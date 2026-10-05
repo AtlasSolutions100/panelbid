@@ -14,6 +14,7 @@ import {
   type SheetRow,
   type SheetSize,
 } from "./takeoffRules";
+import { dollars } from "./materialList";
 
 function clean(value: string | null | undefined): string | null {
   const text = (value ?? "").trim();
@@ -243,20 +244,17 @@ export function priceFromTakeoff(takeoff: ProposalTakeoff): {
  * project lines, the other product lines, adds/deducts, exclusions, notes.
  *
  * Prices are optional. When the takeoff is not fully priced it gives no
- * price: a new proposal starts with none (the person types the total), and a
- * regenerate keeps the total the person typed.
+ * price, and then the proposal has none either: a new proposal starts with
+ * none, and a regenerate CLEARS the price the proposal had. That price was
+ * set for the sheet counts the proposal had before; the FRP line is rewritten
+ * with the counts as they are now, and new counts must never go out under a
+ * price that was set for other counts. The person types the total again
+ * (the export is refused until then).
  */
 export function buildProposalValues(src: ProposalSource): ProposalFieldValues {
-  const typedPrice = src.existing
-    ? {
-        priceAmount: src.existing.priceAmount,
-        priceInWords:
-          src.existing.priceAmount > 0 ? amountInWords(src.existing.priceAmount) : "",
-      }
-    : { priceAmount: 0, priceInWords: "" };
   const fromTakeoff = {
     frp: buildFrpSentence(src.takeoff, src.textures),
-    ...(priceFromTakeoff(src.takeoff) ?? typedPrice),
+    ...(priceFromTakeoff(src.takeoff) ?? { priceAmount: 0, priceInWords: "" }),
   };
   if (src.existing) {
     return {
@@ -292,6 +290,38 @@ export function buildProposalValues(src: ProposalSource): ProposalFieldValues {
     notes: STANDARD_NOTES,
     ...fromTakeoff,
   };
+}
+
+/**
+ * What a Regenerate does to the price when the takeoff gives none, said
+ * BEFORE it happens (the "Regenerate?" window shows these words, with the
+ * figure that will go).
+ */
+export function noPriceRegenerateWarning(
+  currentPrice: number,
+  notPriced: string[],
+): string {
+  const why =
+    notPriced.length > 0
+      ? `The takeoff has no price yet for ${notPriced.join(", ")}.`
+      : "The takeoff has no price.";
+  return currentPrice > 0
+    ? `${why} This proposal's price (${dollars(currentPrice)}) will be cleared: type it again after you check it.`
+    : `${why} This proposal has no price either: type the total in the Price box.`;
+}
+
+/** The same, said AFTER the server answered with no price. */
+export function noPriceRegenerateResult(previousPrice: number): string {
+  return previousPrice > 0
+    ? `The takeoff has no price, so this proposal's price (${dollars(previousPrice)}) was cleared. Check it, then type the total in the Price box.`
+    : "The takeoff has no full price, so the price was not taken from it. Type the total in the Price box.";
+}
+
+/** Why a price sent to the server cannot be stored, in words. Null = fine. */
+export function priceProblem(priceAmount: number): string | null {
+  return Number.isFinite(priceAmount) && priceAmount >= 0
+    ? null
+    : "The price cannot be below 0. Type the total price, or leave the box empty for no price yet.";
 }
 
 // ---------------------------------------------------------------------------

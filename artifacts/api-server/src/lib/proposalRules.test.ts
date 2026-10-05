@@ -6,12 +6,15 @@ import {
   buildFrpSentence,
   buildProposalValues,
   checkProposalForExport,
+  noPriceRegenerateResult,
+  noPriceRegenerateWarning,
+  priceFromTakeoff,
   STANDARD_NOTES,
   type ProposalFieldValues,
   type ProposalTakeoff,
   type RoomTexture,
 } from "./proposalRules";
-import type { RoomRow } from "./takeoffRules";
+import { applySuggestions, type RoomRow } from "./takeoffRules";
 
 const room = (over: Partial<RoomRow> = {}): RoomRow => ({
   roomName: "Kitchen",
@@ -209,6 +212,118 @@ describe("regenerating a proposal", () => {
     expect(again.priceInWords).toBe(
       "Four Thousand Seven Hundred Thirty-Six Dollars and Forty-Four Cents",
     );
+  });
+});
+
+describe("new sheet counts never go out under a price set for other counts", () => {
+  // The checker's scenario: 9 x 4x8 and 6 x 4x10, priced, give $3,799.00.
+  const rooms: RoomRow[] = [
+    room({ wallLengths: "12 + 12 + 10", materialHeight: "8'-0\"" }),
+    restroom({ wallLengths: "6 + 6 + 5'-6\" + 5'-6\"", materialHeight: null, ceilingHeight: "10'-0\"" }),
+  ];
+  const priced = takeoff({
+    roomRows: rooms,
+    sheetRows: [
+      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "suggested" },
+      { sheetsNeeded: 6, sheetSize: "4x10", pricePerSheet: 58.25, sheetsSource: "suggested" },
+    ],
+    laborRate: 65,
+    laborDays: 2,
+    laborHoursPerDay: 8,
+    travelMiles: 0,
+    hotelNights: 0,
+    freight: 0,
+  });
+  const first = buildProposalValues({ job, takeoff: priced, textures: twoTextures, now, existing: null });
+
+  // The restroom ceiling goes to 11 ft: a suggested 6 x 4x12 row appears with
+  // no price, so the takeoff reads "not priced". Saved, then regenerated.
+  const taller = rooms.map((r, i) => (i === 1 ? { ...r, ceilingHeight: "11'-0\"" } : r));
+  const unpriced = {
+    ...priced,
+    roomRows: taller,
+    sheetRows: applySuggestions(rooms, taller, priced.sheetRows),
+  };
+  const again = buildProposalValues({ job, takeoff: unpriced, textures: twoTextures, now, existing: first });
+  // What the page puts in the Price box for a stored price.
+  const priceBox = (p: ProposalFieldValues) => (p.priceAmount > 0 ? p.priceAmount.toFixed(2) : "");
+
+  it("starts from the priced proposal the checker had", () => {
+    expect(first.frp).toContain("An allotment of 9 4x8 and 6 4x10 sheets only.");
+    expect(first.priceAmount).toBe(3799);
+    expect(first.priceInWords).toBe("Three Thousand Seven Hundred Ninety-Nine Dollars");
+    expect(unpriced.sheetRows).toEqual([
+      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "suggested" },
+      { sheetsNeeded: 0, sheetSize: "4x10", pricePerSheet: 58.25, sheetsSource: "suggested" },
+      { sheetsNeeded: 6, sheetSize: "4x12", pricePerSheet: 0, sheetsSource: "suggested" },
+    ]);
+    expect(priceFromTakeoff(unpriced)).toBeNull();
+  });
+
+  it("a regenerate from a takeoff with no price clears the price: no old price under the new counts", () => {
+    expect(again.frp).toContain("An allotment of 9 4x8 and 6 4x12 sheets only.");
+    expect(again.priceAmount).toBe(0);
+    expect(again.priceInWords).toBe("");
+  });
+
+  it("and the proposal cannot be exported until a price is typed again", () => {
+    const check = checkProposalForExport({ frp: again.frp, priceAmount: priceBox(again) });
+    expect(check.amount).toBeNull();
+    expect(check.problems).toEqual(["There is no price. Type the total price before you export."]);
+  });
+
+  it("clears a price the person typed too: the server never keeps a price the takeoff does not give", () => {
+    const typed: ProposalFieldValues = { ...first, priceAmount: 4100, priceInWords: "Four Thousand One Hundred Dollars" };
+    const p = buildProposalValues({ job, takeoff: unpriced, textures: twoTextures, now, existing: typed });
+    expect(p.priceAmount).toBe(0);
+    expect(p.priceInWords).toBe("");
+    // everything else he typed is still kept
+    const kept = buildProposalValues({
+      job,
+      takeoff: unpriced,
+      textures: twoTextures,
+      now,
+      existing: { ...typed, exclusions: "Demolition of existing wall finish." },
+    });
+    expect(kept.exclusions).toBe("Demolition of existing wall finish.");
+  });
+
+  it("when the takeoff gives a price nothing changes: the price is the takeoff's, to the cent", () => {
+    const typed: ProposalFieldValues = { ...first, priceAmount: 4100, priceInWords: "Four Thousand One Hundred Dollars" };
+    const p = buildProposalValues({ job, takeoff: priced, textures: twoTextures, now, existing: typed });
+    expect(p.priceAmount).toBe(3799);
+    expect(p.priceInWords).toBe("Three Thousand Seven Hundred Ninety-Nine Dollars");
+    // and with the new row priced, the new counts get their own price
+    const repriced = {
+      ...unpriced,
+      sheetRows: unpriced.sheetRows.map((r) => (r.sheetSize === "4x12" ? { ...r, pricePerSheet: 70 } : r)),
+    };
+    const q = buildProposalValues({ job, takeoff: repriced, textures: twoTextures, now, existing: again });
+    expect(q.priceAmount).toBe(9 * 45.5 + 6 * 70 + 65 * 2 * 8 + 2000);
+    expect(q.priceAmount).toBe(3869.5);
+  });
+
+  it("a first proposal from a takeoff with no price starts with no price, as before", () => {
+    const p = buildProposalValues({ job, takeoff: unpriced, textures: twoTextures, now, existing: null });
+    expect(p.priceAmount).toBe(0);
+    expect(p.priceInWords).toBe("");
+    expect(p.notes).toBe(STANDARD_NOTES);
+  });
+
+  it("says before a regenerate what happens to the price, with the figure", () => {
+    const words = noPriceRegenerateWarning(3799, ["sheet prices (4x12)"]);
+    expect(words).toBe(
+      "The takeoff has no price yet for sheet prices (4x12). " +
+        "This proposal's price ($3,799.00) will be cleared: type it again after you check it.",
+    );
+    expect(noPriceRegenerateWarning(0, ["labor"])).toBe(
+      "The takeoff has no price yet for labor. This proposal has no price either: type the total in the Price box.",
+    );
+    expect(noPriceRegenerateResult(3799)).toMatch(/price \(\$3,799\.00\) was cleared/);
+    // no sentence says the price stays, or that somebody typed it
+    for (const s of [words, noPriceRegenerateWarning(0, []), noPriceRegenerateResult(3799), noPriceRegenerateResult(0)]) {
+      expect(s).not.toMatch(/stays|as you typed/i);
+    }
   });
 });
 

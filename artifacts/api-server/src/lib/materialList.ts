@@ -213,7 +213,7 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-function dollars(n: number): string {
+export function dollars(n: number): string {
   const [whole, cents] = n.toFixed(2).split(".");
   return "$" + whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "." + cents;
 }

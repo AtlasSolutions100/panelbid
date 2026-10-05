@@ -30,7 +30,13 @@ import { FileSignature, RefreshCw, Save, Download, AlertTriangle } from "lucide-
 import { formatDateTime } from "@/lib/format"
 // The price is read, and its words written, by the shared rules: one number
 // for both, and anything unclear is refused instead of guessed.
-import { checkProposalForExport, computeCosts, type ExportCheck } from "@/lib/takeoff-rules"
+import {
+  checkProposalForExport,
+  computeCosts,
+  noPriceRegenerateResult,
+  noPriceRegenerateWarning,
+  type ExportCheck,
+} from "@/lib/takeoff-rules"
 
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" })
@@ -200,6 +206,8 @@ export function ProposalSection({
   ]
 
   const runGenerate = () => {
+    // The price this proposal holds now: said in the message if it is cleared.
+    const priceBefore = proposal?.priceAmount ?? 0
     generateProposal.mutate(
       { jobId },
       {
@@ -210,8 +218,9 @@ export function ProposalSection({
           setPreviewOpen(true)
           toast({
             title: proposal ? "Proposal regenerated" : "Proposal generated",
-            description: !takeoffGivesPrice
-              ? "The takeoff has no full price, so the price was not taken from it. Type the total in the Price box."
+            // The server decides the price; the message says what it answered.
+            description: !(p.priceAmount > 0)
+              ? noPriceRegenerateResult(priceBefore)
               : proposal
                 ? "The FRP line and the price were rewritten from the saved takeoff. Everything else you typed was kept."
                 : "Filled in from the job and the saved takeoff.",
@@ -397,17 +406,19 @@ export function ProposalSection({
                     Two things are rewritten from the takeoff: the <b>FRP line</b> and the <b>price</b>.
                   </p>
                 ) : (
-                  <p>
-                    The <b>FRP line</b> is rewritten from the takeoff. The <b>price stays as you typed it</b>: the
-                    takeoff has no price yet for {takeoffCosts?.notPriced.join(", ") ?? "its lines"}.
+                  <p data-testid="text-regenerate-no-price">
+                    The <b>FRP line</b> is rewritten from the takeoff.{" "}
+                    <b>{noPriceRegenerateWarning(proposal?.priceAmount ?? 0, takeoffCosts?.notPriced ?? [])}</b>
                   </p>
                 )}
                 {proposal && (
                   <div className="rounded-md border p-2 bg-muted/20 text-xs space-y-1">
                     <p className="font-medium text-foreground">Replaced:</p>
                     <p>{proposal.frp}</p>
-                    {takeoffGivesPrice && (
+                    {takeoffGivesPrice ? (
                       <p>Price: {proposal.priceAmount > 0 ? money(proposal.priceAmount) : "not set yet"}</p>
+                    ) : (
+                      proposal.priceAmount > 0 && <p>Price: {money(proposal.priceAmount)} (cleared, not replaced)</p>
                     )}
                   </div>
                 )}

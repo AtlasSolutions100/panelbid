@@ -234,12 +234,15 @@ describe("the proposal price when prices are optional", () => {
     expect(checkProposalForExport({ frp: "FRP", priceAmount: "" }).problems).toHaveLength(1);
   });
 
-  it("keeps the total he typed when the takeoff still has no prices", () => {
+  // Changed on purpose (fix 1): this test used to say the typed total is KEPT.
+  // A kept price could go out under sheet counts it was never set for, so a
+  // regenerate from a takeoff with no price now clears it and he types it again.
+  it("clears the total he typed when the takeoff has no prices: he types it again", () => {
     const first = buildProposalValues({ job, takeoff: { ...base, ...blank }, textures: [], now, existing: null });
     const typed = { ...first, priceAmount: 4100, priceInWords: "Four Thousand One Hundred Dollars" };
     const again = buildProposalValues({ job, takeoff: { ...base, ...blank }, textures: [], now, existing: typed });
-    expect(again.priceAmount).toBe(4100);
-    expect(again.priceInWords).toBe("Four Thousand One Hundred Dollars");
+    expect(again.priceAmount).toBe(0);
+    expect(again.priceInWords).toBe("");
   });
 
   it("a partly priced takeoff never sends its part-total to the proposal", () => {
