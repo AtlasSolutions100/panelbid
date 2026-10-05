@@ -1,0 +1,5 @@
+- [PDF extraction in Node](pdf-extraction-node.md) — use unpdf, not pdfjs-dist (breaks in esbuild bundle: missing DOM polyfills); no-text PDFs get flagged needs_ocr.
+- [Plan-page vision tiling](plan-page-vision-tiling.md) — Claude can't read small plan text unless pages are sent as ≤1568px overlapping tiles; watch pdfinfo pre-rotation sizes.
+- [Inline PDF rendering frontend](inline-pdf-rendering-frontend.md) — native <object>/iframe PDF embed fails in the proxied preview iframe; use react-pdf with the Vite `?url` worker import.
+- [Google Drive link downloads](drive-link-downloads.md) — Drive serves PDFs as octet-stream; detect PDFs by %PDF- magic bytes, and handle the virus-scan confirm page for huge files.
+- [Publish-time schema diff quirks](publish-schema-diff-quirks.md) — bare-boolean CHECKs get mangled into invalid SQL by the dev→prod publish diff; verify with explainSchemaDiff() and fix dev DB + code.

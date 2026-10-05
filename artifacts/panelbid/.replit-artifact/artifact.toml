@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "PanelBid — Bidding Workflow"
+version = "1.0.0"
+id = "artifacts/panelbid"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21470
+
+[services.development]
+run = "pnpm --filter @workspace/panelbid run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/panelbid", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/panelbid/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21470"
+BASE_PATH = "/"

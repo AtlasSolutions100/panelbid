@@ -1,0 +1,1595 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Bidding workflow API for wall panel installation company
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: jobs
+    description: Job queue operations
+  - name: keywords
+    description: Keyword management
+  - name: exclusion-terms
+    description: Email exclusion terms — pre-filter non-bid emails
+  - name: files
+    description: Job file operations
+  - name: specs
+    description: Room material spec extraction and review
+  - name: takeoff
+    description: Takeoff sheet with measurements and pricing
+  - name: proposal
+    description: Customer-ready bid proposals generated from a takeoff
+  - name: gmail
+    description: Gmail inbox integration — automatic bid invite detection
+  - name: contractor-sources
+    description: Known GC / contractor email sources
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /jobs:
+    get:
+      operationId: listJobs
+      tags: [jobs]
+      summary: List all jobs, newest first
+      responses:
+        "200":
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Job"
+    post:
+      operationId: createJob
+      tags: [jobs]
+      summary: Create a job manually
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobInput"
+      responses:
+        "201":
+          description: Created job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+  /jobs/summary:
+    get:
+      operationId: getJobsSummary
+      tags: [jobs]
+      summary: Counts of jobs grouped by status
+      responses:
+        "200":
+          description: Job counts by status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobsSummary"
+  /jobs/{jobId}:
+    get:
+      operationId: getJob
+      tags: [jobs]
+      summary: Get a single job
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateJob
+      tags: [jobs]
+      summary: Update job fields (e.g. status)
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateJobInput"
+      responses:
+        "200":
+          description: Updated job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteJob
+      tags: [jobs]
+      summary: Delete a job and its files
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /jobs/{jobId}/files:
+    get:
+      operationId: listJobFiles
+      tags: [files]
+      summary: List files uploaded to a job
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: List of job files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JobFile"
+    post:
+      operationId: uploadJobFile
+      tags: [files]
+      summary: Upload a PDF file to a job (multipart form, field name "file"; send FormData directly)
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "201":
+          description: Uploaded file record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobFile"
+        "400":
+          description: Invalid file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /jobs/{jobId}/scans:
+    get:
+      operationId: listPlanScans
+      tags: [files]
+      summary: List keyword scan matches for a job's files
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: List of scan matches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PlanScanMatch"
+  /jobs/{jobId}/scan:
+    post:
+      operationId: rescanJob
+      tags: [files]
+      summary: Re-run keyword scanning across all of the job's files
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Scan run summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanRunResult"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /jobs/{jobId}/extract-specs:
+    post:
+      operationId: extractSpecs
+      tags: [specs]
+      summary: Detect finish-schedule pages and run AI spec extraction on them
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Extraction run summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecExtractionResult"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /jobs/{jobId}/room-specs:
+    get:
+      operationId: listRoomSpecs
+      tags: [specs]
+      summary: List extracted room specs for a job
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: List of room specs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RoomSpec"
+    post:
+      operationId: createRoomSpec
+      tags: [specs]
+      summary: Manually add a room spec row
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoomSpecInput"
+      responses:
+        "201":
+          description: Created room spec
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomSpec"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /room-specs/{specId}:
+    patch:
+      operationId: updateRoomSpec
+      tags: [specs]
+      summary: Edit a room spec row
+      parameters:
+        - $ref: "#/components/parameters/SpecId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoomSpecInput"
+      responses:
+        "200":
+          description: Updated room spec
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomSpec"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteRoomSpec
+      tags: [specs]
+      summary: Delete a room spec row
+      parameters:
+        - $ref: "#/components/parameters/SpecId"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /jobs/{jobId}/confirm-specs:
+    post:
+      operationId: confirmSpecs
+      tags: [specs]
+      summary: Mark the spec set reviewed and move the job to takeoff status
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Updated job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /jobs/{jobId}/takeoff:
+    get:
+      operationId: getTakeoff
+      tags: [takeoff]
+      summary: Get a job's takeoff (saved, or a draft pre-populated from confirmed room specs)
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: The takeoff sheet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Takeoff"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: saveTakeoff
+      tags: [takeoff]
+      summary: Save (upsert) a job's takeoff; first save moves the job to proposal_ready
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TakeoffInput"
+      responses:
+        "200":
+          description: The saved takeoff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Takeoff"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /jobs/{jobId}/proposal:
+    get:
+      operationId: getProposal
+      tags: [proposal]
+      summary: Get the job's stored proposal
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: The proposal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proposal"
+        "404":
+          description: Job or proposal not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateProposal
+      tags: [proposal]
+      summary: Update edited proposal fields
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProposalUpdateInput"
+      responses:
+        "200":
+          description: The updated proposal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proposal"
+        "404":
+          description: Job or proposal not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /jobs/{jobId}/proposal/generate:
+    post:
+      operationId: generateProposal
+      tags: [proposal]
+      summary: Generate (or regenerate) the proposal from the job's current takeoff
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: The generated proposal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proposal"
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: No saved takeoff to generate from
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /files/{fileId}/view:
+    get:
+      operationId: viewJobFile
+      tags: [files]
+      summary: View a plan PDF inline in the browser
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: PDF content served inline
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /files/{fileId}/download:
+    get:
+      operationId: downloadJobFile
+      tags: [files]
+      summary: Download an uploaded file
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The file binary
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /files/{fileId}:
+    delete:
+      operationId: deleteJobFile
+      tags: [files]
+      summary: Delete an uploaded file
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /files/{fileId}/extract-prices:
+    post:
+      operationId: extractPriceSheet
+      tags: [takeoff]
+      summary: Start background AI extraction of price line items from a price sheet PDF
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+      responses:
+        "202":
+          description: Extraction started (or already running)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceSheetExtraction"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Extraction already running for this file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceSheetExtraction"
+  /files/{fileId}/price-extraction:
+    get:
+      operationId: getPriceSheetExtraction
+      tags: [takeoff]
+      summary: Get the price extraction status for a file
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+      responses:
+        "200":
+          description: Extraction status ("not_started" when never run)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceSheetExtraction"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /files/{fileId}/price-items:
+    get:
+      operationId: listPriceSheetItems
+      tags: [takeoff]
+      summary: List extracted price line items for a price sheet file
+      parameters:
+        - $ref: "#/components/parameters/FileId"
+      responses:
+        "200":
+          description: List of extracted price items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PriceSheetItem"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /keywords:
+    get:
+      operationId: listKeywords
+      tags: [keywords]
+      summary: List all keywords
+      responses:
+        "200":
+          description: List of keywords
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Keyword"
+    post:
+      operationId: createKeyword
+      tags: [keywords]
+      summary: Add a new keyword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKeywordInput"
+      responses:
+        "201":
+          description: Created keyword
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Keyword"
+  /keywords/{keywordId}:
+    patch:
+      operationId: updateKeyword
+      tags: [keywords]
+      summary: Update a keyword (e.g. toggle active)
+      parameters:
+        - $ref: "#/components/parameters/KeywordId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateKeywordInput"
+      responses:
+        "200":
+          description: Updated keyword
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Keyword"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteKeyword
+      tags: [keywords]
+      summary: Delete a keyword
+      parameters:
+        - $ref: "#/components/parameters/KeywordId"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /exclusion-terms:
+    get:
+      operationId: listExclusionTerms
+      tags: [exclusion-terms]
+      summary: List all email exclusion terms
+      responses:
+        "200":
+          description: List of exclusion terms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExclusionTerm"
+    post:
+      operationId: createExclusionTerm
+      tags: [exclusion-terms]
+      summary: Add a new exclusion term
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExclusionTermInput"
+      responses:
+        "201":
+          description: Created exclusion term
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExclusionTerm"
+  /exclusion-terms/{exclusionTermId}:
+    patch:
+      operationId: updateExclusionTerm
+      tags: [exclusion-terms]
+      summary: Update an exclusion term (e.g. toggle active)
+      parameters:
+        - $ref: "#/components/parameters/ExclusionTermId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateExclusionTermInput"
+      responses:
+        "200":
+          description: Updated exclusion term
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExclusionTerm"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteExclusionTerm
+      tags: [exclusion-terms]
+      summary: Delete an exclusion term
+      parameters:
+        - $ref: "#/components/parameters/ExclusionTermId"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /contractor-sources:
+    get:
+      operationId: listContractorSources
+      tags: [contractor-sources]
+      summary: List all contractor sources
+      responses:
+        "200":
+          description: List of contractor sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContractorSource"
+    post:
+      operationId: createContractorSource
+      tags: [contractor-sources]
+      summary: Add a new contractor source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContractorSourceInput"
+      responses:
+        "201":
+          description: Created contractor source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorSource"
+        "400":
+          description: Invalid domain or email value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /contractor-sources/{contractorSourceId}:
+    patch:
+      operationId: updateContractorSource
+      tags: [contractor-sources]
+      summary: Update a contractor source (e.g. toggle active)
+      parameters:
+        - $ref: "#/components/parameters/ContractorSourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateContractorSourceInput"
+      responses:
+        "200":
+          description: Updated contractor source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractorSource"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteContractorSource
+      tags: [contractor-sources]
+      summary: Delete a contractor source
+      parameters:
+        - $ref: "#/components/parameters/ContractorSourceId"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /gmail/status:
+    get:
+      operationId: getGmailStatus
+      tags: [gmail]
+      summary: Get Gmail connection status
+      responses:
+        "200":
+          description: Gmail connection status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GmailStatus"
+  /gmail/disconnect:
+    post:
+      operationId: disconnectGmail
+      tags: [gmail]
+      summary: Disconnect Gmail and disable polling
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GmailDisconnectResult"
+  /gmail/poll:
+    post:
+      operationId: triggerGmailPoll
+      tags: [gmail]
+      summary: Trigger an immediate Gmail poll
+      responses:
+        "200":
+          description: Poll triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GmailPollResult"
+        "400":
+          description: Gmail not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /gmail/activity:
+    get:
+      operationId: listGmailActivity
+      tags: [gmail]
+      summary: List recently processed emails (newest first, max 50)
+      responses:
+        "200":
+          description: Processed email log
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProcessedEmail"
+  /gmail/activity/{processedEmailId}/process-anyway:
+    post:
+      operationId: processEmailAnyway
+      tags: [gmail]
+      summary: Reprocess a filtered email with the pre-filters bypassed
+      parameters:
+        - $ref: "#/components/parameters/ProcessedEmailId"
+      responses:
+        "200":
+          description: Updated processed email entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessedEmail"
+        "400":
+          description: Not a filtered email, or Gmail not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: integer
+    KeywordId:
+      name: keywordId
+      in: path
+      required: true
+      schema:
+        type: integer
+    ExclusionTermId:
+      name: exclusionTermId
+      in: path
+      required: true
+      schema:
+        type: integer
+    ProcessedEmailId:
+      name: processedEmailId
+      in: path
+      required: true
+      schema:
+        type: integer
+    ContractorSourceId:
+      name: contractorSourceId
+      in: path
+      required: true
+      schema:
+        type: integer
+    SpecId:
+      name: specId
+      in: path
+      required: true
+      schema:
+        type: integer
+    FileId:
+      name: fileId
+      in: path
+      required: true
+      schema:
+        type: integer
+  schemas:
+    GmailStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        email:
+          type: [string, "null"]
+        isEnabled:
+          type: boolean
+        lastPolledAt:
+          type: [string, "null"]
+        connectedAt:
+          type: [string, "null"]
+        needsReconnect:
+          type: boolean
+      required: [connected, email, isEnabled, lastPolledAt, connectedAt, needsReconnect]
+    GmailDisconnectResult:
+      type: object
+      properties:
+        connected:
+          type: boolean
+      required: [connected]
+    GmailPollResult:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+    EmailOutcome:
+      type: string
+      enum: [no_plans, job_created, error, filtered]
+    ProcessedEmail:
+      type: object
+      properties:
+        id:
+          type: integer
+        gmailMessageId:
+          type: string
+        sender:
+          type: string
+        subject:
+          type: string
+        receivedAt:
+          type: string
+        outcome:
+          $ref: "#/components/schemas/EmailOutcome"
+        jobId:
+          type: [integer, "null"]
+        errorMessage:
+          type: [string, "null"]
+        filterReason:
+          type: [string, "null"]
+        matchedContractorName:
+          type: [string, "null"]
+        processedAt:
+          type: string
+      required: [id, gmailMessageId, sender, subject, receivedAt, outcome, jobId, errorMessage, filterReason, matchedContractorName, processedAt]
+    ContractorSource:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        value:
+          type: [string, "null"]
+        active:
+          type: boolean
+        notes:
+          type: [string, "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, name, value, active, notes, createdAt, updatedAt]
+    CreateContractorSourceInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        value:
+          type: [string, "null"]
+          description: Domain (example.com) or exact email address; may be omitted for name-only entries
+        notes:
+          type: string
+      required: [name]
+    UpdateContractorSourceInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        value:
+          type: [string, "null"]
+        active:
+          type: boolean
+        notes:
+          type: [string, "null"]
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+    JobSource:
+      type: string
+      enum: [email, planhub]
+    JobStatus:
+      type: string
+      enum: [new, analyzing, needs_review, takeoff, proposal_ready, discarded]
+    KeywordCategory:
+      type: string
+      enum: [frp, stainless, pvc, high_impact, manufacturer]
+    MaterialCategory:
+      type: string
+      enum: [frp, stainless, pvc]
+    Job:
+      type: object
+      properties:
+        id:
+          type: integer
+        jobName:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        source:
+          $ref: "#/components/schemas/JobSource"
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        fileCount:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        [id, jobName, address, city, source, status, fileCount, createdAt, updatedAt]
+    CreateJobInput:
+      type: object
+      properties:
+        jobName:
+          type: string
+          minLength: 1
+        address:
+          type: string
+          minLength: 1
+        city:
+          type: string
+          minLength: 1
+        source:
+          $ref: "#/components/schemas/JobSource"
+      required: [jobName, address, city]
+    UpdateJobInput:
+      type: object
+      properties:
+        jobName:
+          type: string
+          minLength: 1
+        address:
+          type: string
+          minLength: 1
+        city:
+          type: string
+          minLength: 1
+        status:
+          $ref: "#/components/schemas/JobStatus"
+    JobsSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        byStatus:
+          type: object
+          properties:
+            new:
+              type: integer
+            analyzing:
+              type: integer
+            needs_review:
+              type: integer
+            takeoff:
+              type: integer
+            proposal_ready:
+              type: integer
+            discarded:
+              type: integer
+          required: [new, analyzing, needs_review, takeoff, proposal_ready, discarded]
+      required: [total, byStatus]
+    JobFile:
+      type: object
+      properties:
+        id:
+          type: integer
+        jobId:
+          type: integer
+        fileName:
+          type: string
+        fileHash:
+          type: string
+        fileType:
+          type: string
+        needsOcr:
+          type: boolean
+          description: True when no extractable text was found in the PDF (likely scanned images requiring OCR)
+        fileSize:
+          type: integer
+        uploadedAt:
+          type: string
+      required: [id, jobId, fileName, fileHash, fileType, needsOcr, fileSize, uploadedAt]
+    PlanScanMatch:
+      type: object
+      properties:
+        id:
+          type: integer
+        jobId:
+          type: integer
+        fileId:
+          type: integer
+        fileName:
+          type: string
+        keywordId:
+          type: integer
+        term:
+          type: string
+        category:
+          $ref: "#/components/schemas/KeywordCategory"
+        pageNumber:
+          type: integer
+        context:
+          type: string
+          description: Surrounding text snippet where the keyword was found
+        scannedAt:
+          type: string
+      required:
+        [id, jobId, fileId, fileName, keywordId, term, category, pageNumber, context, scannedAt]
+    ExtractionConfidence:
+      type: string
+      enum: [high, ambiguous]
+    RoomSpec:
+      type: object
+      properties:
+        id:
+          type: integer
+        jobId:
+          type: integer
+        sourceFileId:
+          type: [integer, "null"]
+        sourceFileName:
+          type: [string, "null"]
+        sourcePage:
+          type: [integer, "null"]
+        sourcePages:
+          type: [string, "null"]
+          description: All plan pages that contributed data to this merged row, e.g. "15, 19"
+        roomName:
+          type: [string, "null"]
+        roomNumber:
+          type: [string, "null"]
+        materialCategory:
+          oneOf:
+            - $ref: "#/components/schemas/MaterialCategory"
+            - type: "null"
+        materialHeight:
+          type: [string, "null"]
+        ceilingHeight:
+          type: [string, "null"]
+          description: Ceiling height from the finish schedule, when available
+        manufacturer:
+          type: [string, "null"]
+        color:
+          type: [string, "null"]
+        productCode:
+          type: [string, "null"]
+        texture:
+          type: [string, "null"]
+        fireRating:
+          type: [string, "null"]
+        fireRatingDefaulted:
+          type: boolean
+          description: True when fire rating was defaulted to "Class C" because the plans showed no rating anywhere
+        extractionConfidence:
+          $ref: "#/components/schemas/ExtractionConfidence"
+        createdAt:
+          type: string
+      required:
+        [id, jobId, sourceFileId, sourceFileName, sourcePage, sourcePages, roomName, roomNumber, materialCategory, materialHeight, ceilingHeight, manufacturer, color, productCode, texture, fireRating, fireRatingDefaulted, extractionConfidence, createdAt]
+    RoomSpecInput:
+      type: object
+      properties:
+        roomName:
+          type: [string, "null"]
+        roomNumber:
+          type: [string, "null"]
+        materialCategory:
+          oneOf:
+            - $ref: "#/components/schemas/MaterialCategory"
+            - type: "null"
+        materialHeight:
+          type: [string, "null"]
+        ceilingHeight:
+          type: [string, "null"]
+        manufacturer:
+          type: [string, "null"]
+        color:
+          type: [string, "null"]
+        productCode:
+          type: [string, "null"]
+        texture:
+          type: [string, "null"]
+        fireRating:
+          type: [string, "null"]
+        extractionConfidence:
+          $ref: "#/components/schemas/ExtractionConfidence"
+    MoldingType:
+      type: string
+      enum: [aluminum, pvc]
+    SheetSize:
+      type: string
+      enum: ["4x4", "4x8", "4x10", "4x12"]
+    TakeoffRoomRow:
+      type: object
+      properties:
+        roomName:
+          type: [string, "null"]
+        roomNumber:
+          type: [string, "null"]
+        wallLengths:
+          type: string
+          description: Wall lengths as entered, e.g. "8 + 8 + 8 + 8" (displayed verbatim)
+        materialHeight:
+          type: [string, "null"]
+        manufacturer:
+          type: [string, "null"]
+        color:
+          type: [string, "null"]
+        productCode:
+          type: [string, "null"]
+        fireRating:
+          type: [string, "null"]
+        moldingType:
+          oneOf:
+            - $ref: "#/components/schemas/MoldingType"
+            - type: "null"
+      required:
+        [roomName, roomNumber, wallLengths, materialHeight, manufacturer, color, productCode, fireRating, moldingType]
+    TakeoffSheetRow:
+      type: object
+      properties:
+        sheetsNeeded:
+          type: number
+        sheetSize:
+          $ref: "#/components/schemas/SheetSize"
+        pricePerSheet:
+          type: number
+      required: [sheetsNeeded, sheetSize, pricePerSheet]
+    Takeoff:
+      type: object
+      properties:
+        jobId:
+          type: integer
+        saved:
+          type: boolean
+          description: False when this is a draft pre-populated from room specs and not yet persisted
+        roomRows:
+          type: array
+          items:
+            $ref: "#/components/schemas/TakeoffRoomRow"
+        sheetRows:
+          type: array
+          items:
+            $ref: "#/components/schemas/TakeoffSheetRow"
+        priceSheetFileId:
+          type: [integer, "null"]
+        laborRate:
+          type: number
+        laborDays:
+          type: number
+        laborHoursPerDay:
+          type: number
+        travelMiles:
+          type: number
+        hotelNights:
+          type: number
+        freight:
+          type: number
+        profitOverride:
+          type: [number, "null"]
+          description: Null means use the auto-calculated profit
+        totalPrice:
+          type: number
+        notes:
+          type: [string, "null"]
+        thickness:
+          type: [string, "null"]
+          description: Panel thickness (e.g. ".090") used by the proposal FRP sentence
+        updatedAt:
+          type: [string, "null"]
+      required:
+        [jobId, saved, roomRows, sheetRows, priceSheetFileId, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, profitOverride, totalPrice, notes, thickness, updatedAt]
+    TakeoffInput:
+      type: object
+      properties:
+        roomRows:
+          type: array
+          items:
+            $ref: "#/components/schemas/TakeoffRoomRow"
+        sheetRows:
+          type: array
+          items:
+            $ref: "#/components/schemas/TakeoffSheetRow"
+        priceSheetFileId:
+          type: [integer, "null"]
+        laborRate:
+          type: number
+        laborDays:
+          type: number
+        laborHoursPerDay:
+          type: number
+        travelMiles:
+          type: number
+        hotelNights:
+          type: number
+        freight:
+          type: number
+        profitOverride:
+          type: [number, "null"]
+        totalPrice:
+          type: number
+        notes:
+          type: [string, "null"]
+        thickness:
+          type: [string, "null"]
+      required:
+        [roomRows, sheetRows, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, totalPrice]
+    PriceExtractionStatus:
+      type: string
+      enum: [not_started, running, completed, failed]
+    PriceSheetExtraction:
+      type: object
+      properties:
+        fileId:
+          type: integer
+        status:
+          $ref: "#/components/schemas/PriceExtractionStatus"
+        error:
+          type: [string, "null"]
+        itemCount:
+          type: integer
+        pagesProcessed:
+          type: integer
+        pagesFailed:
+          type: integer
+        updatedAt:
+          type: [string, "null"]
+      required: [fileId, status, error, itemCount, pagesProcessed, pagesFailed, updatedAt]
+    PriceSheetItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        jobFileId:
+          type: integer
+        productDescription:
+          type: [string, "null"]
+        sheetSize:
+          type: [string, "null"]
+          description: Raw sheet size text as printed on the price sheet, e.g. "4x8"
+        pricePerSheet:
+          type: [number, "null"]
+        pricePerSqft:
+          type: [number, "null"]
+        productCode:
+          type: [string, "null"]
+        extractionConfidence:
+          $ref: "#/components/schemas/ExtractionConfidence"
+        sourcePage:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        [id, jobFileId, productDescription, sheetSize, pricePerSheet, pricePerSqft, productCode, extractionConfidence, sourcePage, createdAt]
+    Proposal:
+      type: object
+      properties:
+        id:
+          type: integer
+        jobId:
+          type: integer
+        proposalDate:
+          type: string
+        projectName:
+          type: string
+        projectAddress:
+          type: string
+        projectCity:
+          type: string
+        frp:
+          type: string
+        highImpactWallPanel:
+          type: string
+        cornerGuards:
+          type: string
+        stainlessSteel:
+          type: string
+        addsDeducts:
+          type: string
+        exclusions:
+          type: string
+        notes:
+          type: string
+        priceAmount:
+          type: number
+        priceInWords:
+          type: string
+        generatedAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        [id, jobId, proposalDate, projectName, projectAddress, projectCity, frp, highImpactWallPanel, cornerGuards, stainlessSteel, addsDeducts, exclusions, notes, priceAmount, priceInWords, generatedAt, updatedAt]
+    ProposalUpdateInput:
+      type: object
+      properties:
+        proposalDate:
+          type: string
+        projectName:
+          type: string
+        projectAddress:
+          type: string
+        projectCity:
+          type: string
+        frp:
+          type: string
+        highImpactWallPanel:
+          type: string
+        cornerGuards:
+          type: string
+        stainlessSteel:
+          type: string
+        addsDeducts:
+          type: string
+        exclusions:
+          type: string
+        notes:
+          type: string
+        priceAmount:
+          type: number
+        priceInWords:
+          type: string
+    SpecExtractionResult:
+      type: object
+      properties:
+        candidatePages:
+          type: integer
+          description: Number of finish-schedule candidate pages detected
+        pagesProcessed:
+          type: integer
+        pagesFailed:
+          type: integer
+          description: Candidate pages that could not be processed this run; their previously extracted rows are left untouched
+        filesFailed:
+          type: integer
+          description: Files that could not be read during candidate detection; their previously extracted rows are left untouched
+        roomsExtracted:
+          type: integer
+        ambiguousRooms:
+          type: integer
+      required: [candidatePages, pagesProcessed, pagesFailed, filesFailed, roomsExtracted, ambiguousRooms]
+    ScanRunResult:
+      type: object
+      properties:
+        filesScanned:
+          type: integer
+        matchCount:
+          type: integer
+        filesNeedingOcr:
+          type: integer
+      required: [filesScanned, matchCount, filesNeedingOcr]
+    Keyword:
+      type: object
+      properties:
+        id:
+          type: integer
+        term:
+          type: string
+        category:
+          $ref: "#/components/schemas/KeywordCategory"
+        active:
+          type: boolean
+      required: [id, term, category, active]
+    CreateKeywordInput:
+      type: object
+      properties:
+        term:
+          type: string
+          minLength: 1
+        category:
+          $ref: "#/components/schemas/KeywordCategory"
+      required: [term, category]
+    UpdateKeywordInput:
+      type: object
+      properties:
+        term:
+          type: string
+          minLength: 1
+        active:
+          type: boolean
+    ExclusionMatchType:
+      type: string
+      enum: [subject, sender, either]
+    ExclusionTerm:
+      type: object
+      properties:
+        id:
+          type: integer
+        term:
+          type: string
+        matchType:
+          $ref: "#/components/schemas/ExclusionMatchType"
+        active:
+          type: boolean
+      required: [id, term, matchType, active]
+    CreateExclusionTermInput:
+      type: object
+      properties:
+        term:
+          type: string
+          minLength: 1
+        matchType:
+          $ref: "#/components/schemas/ExclusionMatchType"
+      required: [term, matchType]
+    UpdateExclusionTermInput:
+      type: object
+      properties:
+        term:
+          type: string
+          minLength: 1
+        matchType:
+          $ref: "#/components/schemas/ExclusionMatchType"
+        active:
+          type: boolean
