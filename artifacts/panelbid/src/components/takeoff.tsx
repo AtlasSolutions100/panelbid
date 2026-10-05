@@ -567,9 +567,7 @@ export function TakeoffSection({
                 <th className="p-3">Room</th>
                 <th className="p-3">Rm #</th>
                 <th className="p-3">Wall Lengths (ft)</th>
-                <th className="p-3 text-right">Total LF</th>
                 <th className="p-3">Panel Height</th>
-                <th className="p-3">Ceiling Ht</th>
                 <th className="p-3">Suggested Sheets</th>
                 <th className="p-3">Manufacturer</th>
                 <th className="p-3">Color</th>
@@ -582,7 +580,7 @@ export function TakeoffSection({
             <tbody className="divide-y divide-border/40">
               {roomRows.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="p-6 text-center text-muted-foreground text-sm">
+                  <td colSpan={11} className="p-6 text-center text-muted-foreground text-sm">
                     No rooms yet. Rooms are pre-populated from confirmed Room Specs, or add rows manually.
                   </td>
                 </tr>
@@ -592,7 +590,7 @@ export function TakeoffSection({
                 return (
                 <tr key={i} className="hover:bg-muted/20 transition-colors align-top">
                   <td className="p-2">
-                    <Input className={`${inputCls} min-w-[130px]`} value={row.roomName ?? ""} placeholder="Room" data-testid={`input-room-name-${i}`}
+                    <Input className={`${inputCls} min-w-[110px]`} value={row.roomName ?? ""} placeholder="Room" data-testid={`input-room-name-${i}`}
                       onChange={(e) => updateRoomRow(i, { roomName: e.target.value })} />
                   </td>
                   <td className="p-2">
@@ -602,34 +600,35 @@ export function TakeoffSection({
                   <td className="p-2">
                     <Input className={`${inputCls} min-w-[150px] font-mono`} value={row.wallLengths} placeholder="8 + 8 + 8 + 8" data-testid={`input-wall-lengths-${i}`}
                       onChange={(e) => updateRoomRow(i, { wallLengths: e.target.value })} />
-                  </td>
-                  <td className="p-2 text-right font-mono text-xs whitespace-nowrap" data-testid={`text-lf-${i}`}>
-                    {rs && rs.wall.units > 0 ? `${Number(rs.wall.feet.toFixed(2))} LF` : "—"}
+                    <div className="mt-1 font-mono text-[11px] text-muted-foreground" data-testid={`text-lf-${i}`}>
+                      {rs && rs.wall.units > 0 ? `${Number(rs.wall.feet.toFixed(2))} LF` : "—"}
+                    </div>
                     {rs && !rs.wall.ok && (
-                      <div className="text-[10px] text-destructive font-sans whitespace-normal max-w-[140px]" data-testid={`text-lf-unread-${i}`}>
+                      <div className="text-[10px] text-destructive max-w-[150px]" data-testid={`text-lf-unread-${i}`}>
                         can't read "{rs.wall.unread[0]}"
                       </div>
                     )}
                   </td>
                   <td className="p-2">
-                    <Input className={`${inputCls} w-20`} value={row.materialHeight ?? ""} placeholder="—" data-testid={`input-panel-height-${i}`}
+                    <Input className={`${inputCls} w-24`} value={row.materialHeight ?? ""} placeholder="panel height" data-testid={`input-panel-height-${i}`}
+                      title="Panel (FRP) height"
                       onChange={(e) => updateRoomRow(i, { materialHeight: e.target.value })} />
+                    <div className="mt-1 text-[10px] text-muted-foreground">ceiling</div>
+                    <Input className={`${inputCls} w-24`} value={row.ceilingHeight ?? ""} placeholder="—" data-testid={`input-ceiling-height-${i}`}
+                      title="Ceiling height"
+                      onChange={(e) => updateRoomRow(i, { ceilingHeight: e.target.value })} />
                     {rs?.height.assumed && (
                       <div className="mt-1 text-[10px] font-medium text-amber-700 whitespace-nowrap" data-testid={`text-height-assumed-${i}`}>
                         assumed to ceiling ({Number((rs.height.feet ?? 0).toFixed(2))} ft)
                       </div>
                     )}
                     {rs && rs.height.source === "none" && (
-                      <div className="mt-1 text-[10px] text-muted-foreground max-w-[120px]" data-testid={`text-height-missing-${i}`}>
+                      <div className="mt-1 text-[10px] text-muted-foreground max-w-[140px]" data-testid={`text-height-missing-${i}`}>
                         {rs.height.note}
                       </div>
                     )}
                   </td>
-                  <td className="p-2">
-                    <Input className={`${inputCls} w-20`} value={row.ceilingHeight ?? ""} placeholder="—" data-testid={`input-ceiling-height-${i}`}
-                      onChange={(e) => updateRoomRow(i, { ceilingHeight: e.target.value })} />
-                  </td>
-                  <td className="p-2 text-xs min-w-[190px]" data-testid={`text-room-suggestion-${i}`}>
+                  <td className="p-2 text-xs min-w-[140px] max-w-[200px]" data-testid={`text-room-suggestion-${i}`}>
                     {rs && rs.sheets !== null ? (
                       <>
                         <div className="font-mono font-medium">{rs.sheets} × {rs.sheetSize}</div>
@@ -644,15 +643,15 @@ export function TakeoffSection({
                       onChange={(e) => updateRoomRow(i, { manufacturer: e.target.value })} />
                   </td>
                   <td className="p-2">
-                    <Input className={`${inputCls} w-24`} value={row.color ?? ""} placeholder="—" data-testid={`input-color-${i}`}
+                    <Input className={`${inputCls} w-20`} value={row.color ?? ""} placeholder="—" data-testid={`input-color-${i}`}
                       onChange={(e) => updateRoomRow(i, { color: e.target.value })} />
                   </td>
                   <td className="p-2">
-                    <Input className={`${inputCls} w-24 font-mono`} value={row.productCode ?? ""} placeholder="—"
+                    <Input className={`${inputCls} w-20 font-mono`} value={row.productCode ?? ""} placeholder="—"
                       onChange={(e) => updateRoomRow(i, { productCode: e.target.value })} />
                   </td>
                   <td className="p-2">
-                    <Input className={`${inputCls} w-24`} value={row.fireRating ?? ""} placeholder="—" data-testid={`input-fire-rating-${i}`}
+                    <Input className={`${inputCls} w-20`} value={row.fireRating ?? ""} placeholder="—" data-testid={`input-fire-rating-${i}`}
                       onChange={(e) => updateRoomRow(i, { fireRating: e.target.value })} />
                   </td>
                   <td className="p-2">
@@ -660,7 +659,7 @@ export function TakeoffSection({
                       value={row.moldingType ?? "none"}
                       onValueChange={(v) => updateRoomRow(i, { moldingType: v === "none" ? null : (v as MoldingType) })}
                     >
-                      <SelectTrigger className="h-8 w-[110px] text-xs" data-testid={`select-molding-${i}`}>
+                      <SelectTrigger className="h-8 w-[100px] text-xs" data-testid={`select-molding-${i}`}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
