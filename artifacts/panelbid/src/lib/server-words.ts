@@ -42,32 +42,39 @@ export interface Notice {
   text: string
 }
 
+function readNotice(storageKey: string): Notice | null {
+  try {
+    const raw = window.sessionStorage.getItem(storageKey)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as Notice).text === "string" &&
+      ((parsed as Notice).kind === "failed" || (parsed as Notice).kind === "warning")
+    ) {
+      return parsed as Notice
+    }
+  } catch {
+    // no storage: the notice simply does not outlive a reload
+  }
+  return null
+}
+
 /**
  * The last failure of one action on one job. It stays on the screen (also
  * after a reload, in this tab) until the next try clears it.
  */
 export function useNotice(key: string): [Notice | null, (notice: Notice | null) => void] {
   const storageKey = `panelbid.notice.${key}`
-  const [notice, setNotice] = useState<Notice | null>(() => {
-    try {
-      const raw = window.sessionStorage.getItem(storageKey)
-      const parsed: unknown = raw ? JSON.parse(raw) : null
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        typeof (parsed as Notice).text === "string" &&
-        ((parsed as Notice).kind === "failed" || (parsed as Notice).kind === "warning")
-      ) {
-        return parsed as Notice
-      }
-    } catch {
-      // no storage: the notice simply does not outlive a reload
-    }
-    return null
-  })
+  const [held, setHeld] = useState(() => ({ storageKey, notice: readNotice(storageKey) }))
+  // Another job on the same screen: its own notice, never the last job's.
+  const current =
+    held.storageKey === storageKey ? held : { storageKey, notice: readNotice(storageKey) }
+  if (current !== held) setHeld(current)
+
   const set = useCallback(
     (next: Notice | null) => {
-      setNotice(next)
+      setHeld({ storageKey, notice: next })
       try {
         if (next) window.sessionStorage.setItem(storageKey, JSON.stringify(next))
         else window.sessionStorage.removeItem(storageKey)
@@ -77,5 +84,5 @@ export function useNotice(key: string): [Notice | null, (notice: Notice | null) 
     },
     [storageKey],
   )
-  return [notice, set]
+  return [current.notice, set]
 }
