@@ -15,6 +15,7 @@ import {
   runFilterSchemaMigration,
   seedExclusionTerms,
 } from "./lib/filterMigrations";
+import { runFileStoreSchemaMigration } from "./lib/fileStoreMigrations";
 
 const rawPort = process.env["PORT"];
 
@@ -61,6 +62,15 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   await seedExclusionTerms();
+
+  // The table that keeps every plan file's bytes. Without it no plan can be
+  // stored or brought back, so the server must not start half-working.
+  try {
+    await runFileStoreSchemaMigration();
+  } catch (err) {
+    logger.fatal({ err }, "File store schema migration failed — aborting startup");
+    process.exit(1);
+  }
 
   // 2. Data migration: mark legacy connector rows as needing reconnect.
   //    Non-fatal — a failure here doesn't block the new OAuth path.

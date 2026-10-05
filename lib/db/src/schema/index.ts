@@ -1,5 +1,6 @@
 export * from "./jobs";
 export * from "./jobFiles";
+export * from "./jobFileBlobs";
 export * from "./keywords";
 export * from "./exclusionTerms";
 export * from "./planScans";
