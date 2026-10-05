@@ -62,8 +62,9 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  await running.close();
+  // The made-up folders go even when the app could not be started.
   rmSync(root, { recursive: true, force: true });
+  await running?.close();
 });
 
 describe("finding the PDF programs: the order", () => {
