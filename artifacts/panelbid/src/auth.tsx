@@ -286,8 +286,22 @@ function SignIn({ notice, onSignedIn, onNotSetUp }: SignInProps) {
       })
       const says = await readJson(response)
       if (response.ok) {
-        setPassword("")
-        onSignedIn()
+        // The password was right. Make sure the browser really kept the
+        // sign-in cookie before showing the app: it refuses the cookie when
+        // the site is shown inside another site's page (a preview pane, for
+        // one) or when cookies are switched off.
+        const kept = await askServer()
+        if (kept.kind === "signed-in") {
+          setPassword("")
+          onSignedIn()
+        } else if (kept.kind === "not-set-up") {
+          onNotSetUp(kept.missing)
+        } else {
+          setError(
+            "The password is right, but this browser did not keep the sign-in. " +
+              "Open the site in its own tab (not inside another page) and allow cookies for it.",
+          )
+        }
         return
       }
       if (response.status === 503 && says.code === "not_configured") {
