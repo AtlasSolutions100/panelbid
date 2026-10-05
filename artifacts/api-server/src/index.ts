@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { readAuthSettings } from "./lib/auth";
 import { startGmailPolling } from "./lib/gmailWorker";
 import {
   runGmailSchemaMigration,
@@ -67,6 +68,17 @@ async function main(): Promise<void> {
     await migrateGmailLegacyRows();
   } catch (err) {
     logger.error({ err }, "Gmail legacy-row migration failed — continuing");
+  }
+
+  // Say it loudly when the sign-in is not set up. The server still starts
+  // (so the page can tell the owner what is wrong) but the gate in
+  // middlewares/apiGate.ts refuses every request. Names only, never values.
+  const authSettings = readAuthSettings();
+  if (!authSettings.ok) {
+    logger.error(
+      { missing: authSettings.missing },
+      "Sign-in is NOT set up: every request is refused until these settings are added (see SIGNIN-SETUP.md)",
+    );
   }
 
   // 3. Bind the HTTP listener only after migrations are complete.
