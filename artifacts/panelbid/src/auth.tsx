@@ -107,8 +107,10 @@ function watchApiCalls(): void {
 async function askServer(): Promise<AuthState> {
   try {
     const response = await fetch(`${API}/auth/session`, { headers: { accept: "application/json" } })
-    if (response.ok) return { kind: "signed-in" }
+    // Always read the answer to the end, so the request is finished and
+    // its connection is free again.
     const says = await readJson(response)
+    if (response.ok) return { kind: "signed-in" }
     if (response.status === 503 && says.code === "not_configured") {
       return { kind: "not-set-up", missing: missingNames(says) }
     }
@@ -123,6 +125,7 @@ async function askServer(): Promise<AuthState> {
 export async function signOut(): Promise<void> {
   try {
     const response = await fetch(`${API}/auth/sign-out`, { method: "POST" })
+    await readJson(response)
     if (!response.ok && response.status !== 401) throw new Error("sign-out refused")
   } catch {
     toast({
@@ -164,8 +167,21 @@ export function AuthGate({ children, onSignedOut }: AuthGateProps) {
     }
     listeners.add(listener)
     void askServer().then(setState)
+
+    // The Back button can bring a page back exactly as it was left, data
+    // and all, without loading it again. Ask the server again when that
+    // happens, so a signed-out browser does not show the old screen.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return
+      void askServer().then((next) => {
+        if (next.kind !== "signed-in") listener(next)
+      })
+    }
+    window.addEventListener("pageshow", onPageShow)
+
     return () => {
       listeners.delete(listener)
+      window.removeEventListener("pageshow", onPageShow)
     }
   }, [])
 
@@ -268,12 +284,12 @@ function SignIn({ notice, onSignedIn, onNotSetUp }: SignInProps) {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({ password }),
       })
+      const says = await readJson(response)
       if (response.ok) {
         setPassword("")
         onSignedIn()
         return
       }
-      const says = await readJson(response)
       if (response.status === 503 && says.code === "not_configured") {
         onNotSetUp(missingNames(says))
         return
