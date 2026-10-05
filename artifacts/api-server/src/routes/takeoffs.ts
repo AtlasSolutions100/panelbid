@@ -15,6 +15,7 @@ import {
   SaveTakeoffResponse,
 } from "@workspace/api-zod";
 import {
+  checkTakeoffNumbers,
   draftRoomRows,
   refreshSuggestedRows,
   sameJson,
@@ -104,6 +105,16 @@ router.put("/jobs/:jobId/takeoff", async (req, res): Promise<void> => {
   const params = SaveTakeoffParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ message: params.error.message });
+    return;
+  }
+  // Refused in words, before anything is read or stored: a number the
+  // takeoff may not hold (see checkTakeoffNumbers). Nothing is put right
+  // silently.
+  const numberProblems = checkTakeoffNumbers(req.body);
+  if (numberProblems.length > 0) {
+    res.status(400).json({
+      message: `The takeoff was not saved. ${numberProblems.join(" ")}`,
+    });
     return;
   }
   const body = SaveTakeoffBody.safeParse(req.body);

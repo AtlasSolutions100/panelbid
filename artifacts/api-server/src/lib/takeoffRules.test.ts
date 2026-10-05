@@ -5,10 +5,12 @@ import { describe, it, expect } from "vitest";
 import {
   PROFIT_FLAT_MAX_SHEETS,
   amountInWords,
+  checkTakeoffNumbers,
   computeCosts,
   flatProfitApplies,
   linearFootage,
   parseWallLengths,
+  readSheetCount,
   readTypedAmount,
   resolvePricePerSheet,
   roundToCents,
@@ -184,6 +186,62 @@ describe("unsaved changes", () => {
   it("any changed figure makes them differ", () => {
     expect(sameJson(base, { ...base, laborDays: 2 })).toBe(false);
     expect(sameJson(base, { ...base, sheetRows: sheets(36) })).toBe(false);
+  });
+});
+
+describe("a sheet count is a whole number of 0 or more", () => {
+  it("reads whole numbers typed into the box", () => {
+    expect(readSheetCount("12")).toEqual({ ok: true, count: 12 });
+    expect(readSheetCount(" 7 ")).toEqual({ ok: true, count: 7 });
+    expect(readSheetCount("0")).toEqual({ ok: true, count: 0 });
+    // an emptied box is no sheets, as before
+    expect(readSheetCount("")).toEqual({ ok: true, count: 0 });
+  });
+
+  it("refuses -5, 8.5, 1e3 and words, in words, and guesses nothing", () => {
+    for (const typed of ["-5", "8.5", "1e3", "abc", "12 sheets", "1,000", "+4", "８"]) {
+      const read = readSheetCount(typed);
+      expect(read.ok, typed).toBe(false);
+      expect(read).toMatchObject({
+        reason: `Can't use "${typed}" as a sheet count. Type a whole number of 0 or more, like 12.`,
+      });
+    }
+  });
+
+  const row = (sheetsNeeded: unknown) => ({ sheetsNeeded, sheetSize: "4x8", pricePerSheet: 45.5 });
+
+  it("the server's check passes whole counts, and a takeoff stored before the update", () => {
+    expect(checkTakeoffNumbers(base)).toEqual([]);
+    expect(checkTakeoffNumbers({ ...base, sheetRows: [row(18)] })).toEqual([]);
+    expect(checkTakeoffNumbers({ ...base, sheetRows: [row(0)] })).toEqual([]);
+    expect(checkTakeoffNumbers({ ...base, sheetRows: [] })).toEqual([]);
+    // 1e3 sent as a JSON number IS the whole number 1000
+    expect(checkTakeoffNumbers(JSON.parse('{"sheetRows":[{"sheetsNeeded":1e3}]}'))).toEqual([]);
+  });
+
+  it("the server's check refuses a count that is not a whole number of 0 or more, naming the row", () => {
+    expect(checkTakeoffNumbers({ ...base, sheetRows: [row(10), row(-5)] })).toEqual([
+      "Sheet row 2: the sheet count must be a whole number of 0 or more (it is -5).",
+    ]);
+    expect(checkTakeoffNumbers({ ...base, sheetRows: [row(8.5)] })).toEqual([
+      "Sheet row 1: the sheet count must be a whole number of 0 or more (it is 8.5).",
+    ]);
+    expect(checkTakeoffNumbers({ ...base, sheetRows: [row("1e3")] })).toEqual([
+      'Sheet row 1: the sheet count must be a whole number of 0 or more (it is "1e3").',
+    ]);
+    expect(checkTakeoffNumbers({ ...base, sheetRows: [row("abc"), row(null), {}] })).toEqual([
+      'Sheet row 1: the sheet count must be a whole number of 0 or more (it is "abc").',
+      "Sheet row 2: the sheet count must be a whole number of 0 or more (it is null).",
+      "Sheet row 3: the sheet count must be a whole number of 0 or more (it is missing).",
+    ]);
+    // a number too big to be a count at all (1e999 reads as Infinity)
+    expect(checkTakeoffNumbers(JSON.parse('{"sheetRows":[{"sheetsNeeded":1e999}]}'))).toHaveLength(1);
+  });
+
+  it("has nothing to say about a body that is not a takeoff (the usual check answers that)", () => {
+    expect(checkTakeoffNumbers(undefined)).toEqual([]);
+    expect(checkTakeoffNumbers("text")).toEqual([]);
+    expect(checkTakeoffNumbers({ sheetRows: "none" })).toEqual([]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   useGetTakeoff,
@@ -52,11 +52,13 @@ import {
   PROFIT_FLAT_MAX_SHEETS,
   applySuggestions,
   buildMaterialList,
+  checkTakeoffNumbers,
   computeCosts,
   flatProfitApplies,
   glueBuckets,
   isSuggested,
   moldingLines,
+  readSheetCount,
   refreshSuggestedRows,
   setMoldingCount,
   tidyMoldingCounts,
@@ -133,6 +135,78 @@ function PriceInput({
       }}
     />
   )
+}
+
+/**
+ * Sheets needed. Only a whole number of 0 or more is a count. Anything else
+ * ("-5", "8.5", "1e3", words) is said in words under the box: the row keeps
+ * the count it had, and Save stays off until the box is put right. The box
+ * keeps its own text so the words can name exactly what was typed.
+ */
+function SheetCountInput({
+  value,
+  onChange,
+  onProblem,
+  testId,
+  className,
+  children,
+}: {
+  value: number
+  onChange: (count: number) => void
+  /** Told the reason while this box cannot be read, and null when it can. */
+  onProblem: (id: string, reason: string | null) => void
+  testId: string
+  className: string
+  /** Shown beside the box (whose count it is). */
+  children?: React.ReactNode
+}) {
+  const id = useId()
+  const [text, setText] = useState(String(value))
+  // The count changed from outside (a suggestion followed the walls, or the
+  // saved copy was put on screen): show it, unless the box already reads as it.
+  useEffect(() => {
+    setText((t) => {
+      const r = readSheetCount(t)
+      return r.ok && r.count === value ? t : String(value)
+    })
+  }, [value])
+  const read = readSheetCount(text)
+  const reason = read.ok ? null : read.reason
+  useEffect(() => {
+    onProblem(id, reason)
+    return () => onProblem(id, null)
+  }, [id, reason, onProblem])
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <Input
+          type="text"
+          inputMode="numeric"
+          className={`${className} ${reason ? "border-destructive" : ""}`}
+          value={text}
+          data-testid={testId}
+          onChange={(e) => {
+            setText(e.target.value)
+            const r = readSheetCount(e.target.value)
+            if (r.ok) onChange(r.count)
+          }}
+        />
+        {children}
+      </div>
+      {reason && (
+        <div className="mt-1 max-w-[240px] text-[10px] text-destructive" data-testid={`${testId}-problem`}>
+          {reason}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A refusal from the server in its own plain words (without "HTTP 400 ..."). */
+function serverWords(err: unknown): string | undefined {
+  const data = (err as { data?: { message?: unknown } } | null)?.data
+  if (data && typeof data.message === "string" && data.message.trim() !== "") return data.message
+  return undefined
 }
 
 /**
@@ -391,9 +465,35 @@ export function TakeoffSection({
   // know when the screen and the saved copy differ.
   const loaded = !!takeoff && loadedFor.current === jobId
   const unsaved = loaded && (savedData === null || !sameJson(savedData, currentData))
+
+  // Numbers the takeoff may not hold (the server refuses them too): said in
+  // words at the top of the sheet, and Save stays off until they are put right.
+  const [countProblems, setCountProblems] = useState<Record<string, string>>({})
+  const reportCountProblem = useCallback((id: string, reason: string | null) => {
+    setCountProblems((all) => {
+      if (reason === null) {
+        if (!(id in all)) return all
+        const { [id]: _gone, ...rest } = all
+        return rest
+      }
+      return all[id] === reason ? all : { ...all, [id]: reason }
+    })
+  }, [])
+  const cannotSave = useMemo(
+    () => [
+      ...checkTakeoffNumbers(currentData),
+      ...(Object.keys(countProblems).length > 0
+        ? ["A sheet count cannot be read: see the words under its box."]
+        : []),
+    ],
+    [currentData, countProblems],
+  )
+  const blocked = cannotSave.length > 0
+
   useEffect(() => {
-    onUnsavedChange?.(unsaved)
-  }, [unsaved, onUnsavedChange])
+    // A sheet with a number that cannot be saved is not "what is saved" either.
+    onUnsavedChange?.(unsaved || blocked)
+  }, [unsaved, blocked, onUnsavedChange])
 
   // Live calculations
   const totals = useMemo(
@@ -471,6 +571,7 @@ export function TakeoffSection({
     )
 
   const handleSave = () => {
+    if (blocked) return
     // Exactly what is on screen at the moment Save is pressed.
     const shownWhenSent = onScreenRef.current
     saveTakeoff.mutate(
@@ -511,7 +612,8 @@ export function TakeoffSection({
                   : "Quantities saved. No job price yet: prices are optional.",
           })
         },
-        onError: () => toast({ title: "Failed to save takeoff", variant: "destructive" }),
+        onError: (err) =>
+          toast({ title: "Failed to save takeoff", description: serverWords(err), variant: "destructive" }),
       },
     )
   }
@@ -565,10 +667,10 @@ export function TakeoffSection({
         </div>
         <div className="flex items-center gap-3">
           <span
-            className={`text-xs ${unsaved ? "text-amber-600 font-medium" : "text-muted-foreground"}`}
+            className={`text-xs ${blocked ? "text-destructive font-medium" : unsaved ? "text-amber-600 font-medium" : "text-muted-foreground"}`}
             data-testid="text-takeoff-save-state"
           >
-            {unsaved ? "Changes not saved" : "Saved"}
+            {blocked ? "Cannot be saved yet" : unsaved ? "Changes not saved" : "Saved"}
           </span>
           <Button
             variant="outline"
@@ -585,7 +687,7 @@ export function TakeoffSection({
             // Nothing to save: the button is off, so a proposal is not marked
             // "older than the takeoff" by a save that changed nothing. (A job
             // still in Takeoff status can always be saved: that moves it on.)
-            disabled={saveTakeoff.isPending || (!unsaved && job.status !== "takeoff")}
+            disabled={saveTakeoff.isPending || blocked || (!unsaved && job.status !== "takeoff")}
             size="sm"
             className="font-mono uppercase tracking-wider text-xs"
             data-testid="button-save-takeoff"
@@ -596,6 +698,19 @@ export function TakeoffSection({
         </div>
       </CardHeader>
       <CardContent className="p-0">
+        {blocked && (
+          <div
+            className="border-b border-destructive/40 bg-destructive/5 px-4 py-2 text-xs text-destructive"
+            data-testid="text-takeoff-cannot-save"
+          >
+            <p className="font-medium">This takeoff cannot be saved yet:</p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              {cannotSave.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {/* Room measurements */}
         <div className="p-4 pb-2">
           <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Room Measurements</h3>
@@ -903,16 +1018,20 @@ export function TakeoffSection({
               {sheetRows.map((row, i) => (
                 <tr key={i} className="hover:bg-muted/20 transition-colors align-top">
                   <td className="p-2">
-                    <div className="flex items-center gap-2">
-                      {/* Typing a count makes the row his: it is never changed for him again. */}
-                      <Input type="number" min={0} className={`${inputCls} w-24 font-mono`} value={row.sheetsNeeded} data-testid={`input-sheets-needed-${i}`}
-                        onChange={(e) => updateSheetRow(i, { sheetsNeeded: num(e.target.value), sheetsSource: "typed" })} />
+                    {/* Typing a count makes the row his: it is never changed for him again. */}
+                    <SheetCountInput
+                      className={`${inputCls} w-24 font-mono`}
+                      value={row.sheetsNeeded}
+                      testId={`input-sheets-needed-${i}`}
+                      onProblem={reportCountProblem}
+                      onChange={(count) => updateSheetRow(i, { sheetsNeeded: count, sheetsSource: "typed" })}
+                    >
                       {isSuggested(row) ? (
                         <Badge variant="secondary" className="text-[10px]" data-testid={`badge-sheets-source-${i}`}>suggested</Badge>
                       ) : (
                         <Badge variant="outline" className="text-[10px] border-primary/50" data-testid={`badge-sheets-source-${i}`}>yours</Badge>
                       )}
-                    </div>
+                    </SheetCountInput>
                     {!isSuggested(row) &&
                       suggestion.bySize[row.sheetSize] > 0 &&
                       !sheetRows.some((r) => isSuggested(r) && r.sheetSize === row.sheetSize) && (

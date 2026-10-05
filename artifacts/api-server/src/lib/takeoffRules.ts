@@ -775,6 +775,66 @@ export function readTypedAmount(text: string): MoneyRead {
 }
 
 // ---------------------------------------------------------------------------
+// Numbers a takeoff may hold
+// ---------------------------------------------------------------------------
+
+export type CountRead = { ok: true; count: number } | { ok: false; reason: string };
+
+/**
+ * Read a sheet count typed into a box, strictly: digits only, so a whole
+ * number of 0 or more. An empty box is 0 (no sheets). "-5", "8.5", "1e3" and
+ * words are refused in words; nothing is guessed.
+ */
+export function readSheetCount(text: string): CountRead {
+  const typed = text.trim();
+  if (typed === "") return { ok: true, count: 0 };
+  if (/^\d+$/.test(typed) && Number.isSafeInteger(Number(typed))) {
+    return { ok: true, count: Number(typed) };
+  }
+  return {
+    ok: false,
+    reason: `Can't use "${typed}" as a sheet count. Type a whole number of 0 or more, like 12.`,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** How a refused value is shown back: 8.5, -5, "abc", nothing. */
+function shown(value: unknown): string {
+  if (value === undefined) return "missing";
+  if (typeof value === "string") return `"${value}"`;
+  return typeof value === "number" ? String(value) : (JSON.stringify(value) ?? String(value));
+}
+
+/**
+ * Why a takeoff cannot be stored, in plain words. Empty = fine.
+ *
+ * A sheet count is a whole number of 0 or more. Nothing is put right
+ * silently.
+ *
+ * The server runs this on what was sent, before anything is stored. The page
+ * runs it on what is on screen and keeps Save off while it has anything to say.
+ */
+export function checkTakeoffNumbers(takeoff: unknown): string[] {
+  const problems: string[] = [];
+  const data = isRecord(takeoff) ? takeoff : {};
+  const rows = Array.isArray(data.sheetRows) ? data.sheetRows : [];
+  rows.forEach((raw: unknown, index: number) => {
+    const row = isRecord(raw) ? raw : {};
+    const where = `Sheet row ${index + 1}`;
+    const count = row.sheetsNeeded;
+    if (!(typeof count === "number" && Number.isInteger(count) && count >= 0)) {
+      problems.push(
+        `${where}: the sheet count must be a whole number of 0 or more (it is ${shown(count)}).`,
+      );
+    }
+  });
+  return problems;
+}
+
+// ---------------------------------------------------------------------------
 // Unsaved changes
 // ---------------------------------------------------------------------------
 
