@@ -400,6 +400,8 @@ export function refreshSuggestedRows(roomRows: RoomRow[], sheetRows: SheetRow[])
  * - A suggested row the person deleted does not come back until the
  *   suggestion for that size itself changes.
  * - A suggested row with nothing typed in it goes away when its rooms do.
+ * - A new suggested row takes its place in sheet-size order (4x8, 4x10,
+ *   4x12), so rows do not jump about while a wall length is being typed.
  */
 export function applySuggestions(
   prevRooms: RoomRow[],
@@ -412,12 +414,17 @@ export function applySuggestions(
   for (const size of SHEET_SIZES) {
     if (before[size] === after[size] || after[size] <= 0) continue;
     if (!rows.some((r) => r.sheetSize === size)) {
-      rows.push({
+      const row: SheetRow = {
         sheetsNeeded: after[size],
         sheetSize: size,
         pricePerSheet: 0,
         sheetsSource: "suggested",
-      });
+      };
+      const bigger = rows.findIndex(
+        (r) => SHEET_SIZES.indexOf(r.sheetSize) > SHEET_SIZES.indexOf(size),
+      );
+      if (bigger === -1) rows.push(row);
+      else rows.splice(bigger, 0, row);
     }
   }
   return refreshSuggestedRows(nextRooms, rows).filter(

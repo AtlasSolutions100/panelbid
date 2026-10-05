@@ -234,6 +234,15 @@ describe("suggested sheet rows for the job", () => {
     expect(applySuggestions(rooms, renamed, rows).map((r) => r.sheetSize)).toEqual(["4x10"]);
   });
 
+  it("a suggested row that comes back takes its place in size order, not the end of the list", () => {
+    const only10 = applySuggestions([], rooms, []).filter((r) => r.sheetSize !== "4x8");
+    const longer = rooms.map((r, i) => (i === 0 ? { ...r, wallLengths: "12 + 12 + 10 + 10" } : r));
+    expect(applySuggestions(rooms, longer, only10).map((r) => r.sheetsNeeded + " " + r.sheetSize)).toEqual([
+      "11 4x8",
+      "16 4x10",
+    ]);
+  });
+
   it("a suggested row with nothing typed in it goes away when its rooms do", () => {
     const rows = applySuggestions([], rooms, []);
     const fewer = rooms.slice(1);
