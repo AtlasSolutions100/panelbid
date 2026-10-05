@@ -430,6 +430,16 @@ describe.skipIf(!haveDatabase)("a plan file is kept in the database", () => {
     expect(prices.status).toBe(410);
     expect(prices.json).toMatchObject({ code: "plan_file_gone", message: GONE });
 
+    // Opened straight in a browser tab (a page link, the download button):
+    // the sentence alone, as text.
+    const asPage = { accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" };
+    for (const kind of ["view", "download"]) {
+      const inTab = await getBytes(running, cookie, `/api/files/${fileId}/${kind}`, asPage);
+      expect(inTab.status).toBe(410);
+      expect(inTab.headers["content-type"]).toContain("text/plain");
+      expect(inTab.body.toString("utf8")).toBe(GONE);
+    }
+
     // Nothing was said about pages nobody has seen, and no path was shown.
     expect((await rowOf(fileId))!.needs_ocr).toBe(false);
     for (const reply of [view.body.toString("utf8"), download.body.toString("utf8"), scan.text, rooms.text, prices.text]) {

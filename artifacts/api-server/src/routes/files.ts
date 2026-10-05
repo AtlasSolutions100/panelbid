@@ -70,9 +70,15 @@ function receiveOneFile(req: Request, res: Response, next: NextFunction): void {
  * Answer with the status and the sentence of a plan-file error (gone: 410).
  * False when the error is something else: the caller passes it on.
  */
-function answeredPlanFileError(res: Response, err: unknown): boolean {
+function answeredPlanFileError(req: Request, res: Response, err: unknown): boolean {
   if (!isPlanFileError(err)) return false;
-  res.status(err.status).json(planFileErrorBody(err));
+  if (req.accepts(["json", "html"]) === "html") {
+    // Opened straight in a browser tab (a "p. 12" link, the download
+    // button): the sentence alone, not JSON.
+    res.status(err.status).type("text/plain; charset=utf-8").send(err.message);
+  } else {
+    res.status(err.status).json(planFileErrorBody(err));
+  }
   return true;
 }
 
@@ -182,7 +188,7 @@ router.get("/files/:fileId/download", async (req, res): Promise<void> => {
   try {
     onDisk = await planFilePath(file);
   } catch (err) {
-    if (answeredPlanFileError(res, err)) return;
+    if (answeredPlanFileError(req, res, err)) return;
     throw err;
   }
 
@@ -211,7 +217,7 @@ router.get("/files/:fileId/view", async (req, res): Promise<void> => {
   try {
     onDisk = await planFilePath(file);
   } catch (err) {
-    if (answeredPlanFileError(res, err)) return;
+    if (answeredPlanFileError(req, res, err)) return;
     throw err;
   }
 

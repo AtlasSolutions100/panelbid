@@ -117,8 +117,13 @@ function rawRequest(
 }
 
 /** GET as bytes (a PDF must come back byte for byte). */
-export function getBytes(running: Running, cookie: string, urlPath: string): Promise<BytesReply> {
-  return rawRequest(running, "GET", urlPath, { cookie });
+export function getBytes(
+  running: Running,
+  cookie: string,
+  urlPath: string,
+  headers: Record<string, string> = {},
+): Promise<BytesReply> {
+  return rawRequest(running, "GET", urlPath, { cookie, ...headers });
 }
 
 /** Upload one file the way the page does (multipart, field "file"). */

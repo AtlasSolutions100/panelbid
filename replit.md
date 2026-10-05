@@ -26,7 +26,7 @@ Bidding workflow tool for a wall panel installation company (FRP, stainless stee
 - API contract: `lib/api-spec/openapi.yaml` (source of truth; run codegen after changes)
 - API routes: `artifacts/api-server/src/routes/` (jobs.ts, keywords.ts, files.ts)
 - Frontend: `artifacts/panelbid/` (react-vite at `/`); theme in `src/index.css`
-- Uploaded PDFs: `artifacts/api-server/uploads/<jobId>/` (local disk, path in `job_files.file_path`)
+- Uploaded PDFs: the bytes are kept in the database table `job_file_blobs` (one row per `job_files` row, deleted with it). The copy under `uploads/<jobId>/` (path in `job_files.file_path`) is only a working copy: the host throws the disk away at every restart, and a missing copy is brought back from the table. `artifacts/api-server/src/lib/planFileStore.ts` is the only code that stores a plan (`storePlanFile`) or hands out its path (`planFilePath`); no reader opens `file_path` itself.
 - Takeoff and proposal rules, in ONE place: `artifacts/api-server/src/lib/takeoffRules.ts` (wall lengths, panel height, suggested sheets, moldings, glue, cost lines, the total, typed dollar amounts), `proposalRules.ts` (FRP line, generate / regenerate, export checks) and `materialList.ts` (the Material list and its printed page). They are pure (no database, no browser). The page reads them through `artifacts/panelbid/src/lib/takeoff-rules.ts`. Never write a rule in the page or in a route.
 - Rule tests (pure, no database needed): `pnpm --filter @workspace/api-server run test:rules` (102 tests in five files under `artifacts/api-server/src/lib/`)
 
@@ -39,7 +39,10 @@ Bidding workflow tool for a wall panel installation company (FRP, stainless stee
 
 ## Architecture decisions
 
-- File uploads use multer memory storage + local disk behind `routes/files.ts` only, so a future storage/intake service can swap in without touching the API contract
+- File uploads use multer memory storage; the row and the bytes are stored in ONE transaction (`lib/planFileStore.ts`), used by `routes/files.ts` and the Gmail watcher. A plan from before 2026-10-05 has no bytes: when its file is gone every reader answers 410 "This plan's file is no longer on the server. Upload it again."
+- `job_file_blobs` is described twice and the two must agree exactly (names included): `lib/db/src/schema/jobFileBlobs.ts` and the start-up `CREATE TABLE IF NOT EXISTS` in `lib/fileStoreMigrations.ts`. It has no CHECK constraint on purpose (the Publish schema compare re-writes them badly).
+- The two PDF programs (`pdfinfo`, `pdftoppm`: poppler) are found and started only by `lib/pdfTools.ts`: the folder named by `POPPLER_BIN_DIR`, then the PATH, then the usual places and `/nix/store/*poppler-utils*/bin`. Missing: both readers answer 503 with a sentence, one loud line at start-up, and Settings shows it (`GET /api/system/check`).
+- Every failure is sent as a status and ONE plain sentence (`{ code, message }`; `lib/readingFailures.ts`); the page shows `message` as it is. Never send an error's own text.
 - SHA-256 hash computed at upload and stored for future deduplication (no dedup logic yet, by design)
 - Upload endpoint has no typed OpenAPI request body (breaks Zod codegen); frontend posts raw FormData to `/api/jobs/:id/files`
 - Keywords live in the DB (not hardcoded) and drive plan scanning (`plan_scans` table stores matches with a keyword snapshot so results survive keyword edits)
@@ -70,6 +73,7 @@ _Populate as you build — explicit user instructions worth remembering across s
 - A proposal is only made from the SAVED takeoff. The page refuses while the takeoff has unsaved changes; Regenerate rewrites only the FRP line and the price and keeps every other field.
 - The price in words is always written from the price by the server; it is not a separate editable value.
 - `src/lib/specExtractor.test.ts` needs a database and `pdftoppm`; the five rule test files above need neither.
+- `src/planFileStore.test.ts` and `src/readingFailures.test.ts` need a real PostgreSQL: they run only when `PANELBID_TEST_DATABASE_URL` names a throwaway database on the same computer that has the app's tables, and are skipped (loudly) without it.
 - The wording added to the AI reader's instructions in update 1 (where heights come from) has NOT been tried against the real reader.
 
 ## Pointers
