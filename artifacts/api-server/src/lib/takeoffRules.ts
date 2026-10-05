@@ -284,6 +284,33 @@ function plain(n: number): string {
   return String(Number(n.toFixed(2)));
 }
 
+/** A height or length for people to read: "8 ft", "3 ft 8 in". */
+export function feetText(feet: number): string {
+  const units = Math.round(feet * UNITS_PER_FOOT);
+  const whole = Math.floor(units / UNITS_PER_FOOT);
+  const inches = (units - whole * UNITS_PER_FOOT) / UNITS_PER_INCH;
+  return inches === 0 ? `${whole} ft` : `${whole} ft ${plain(inches)} in`;
+}
+
+/** How a room is named on the proposal and the material list: "Kitchen 101". */
+export function roomLabel(
+  row: Pick<RoomRow, "roomName" | "roomNumber">,
+  index: number,
+): string {
+  const name = (row.roomName ?? "").trim();
+  const num = (row.roomNumber ?? "").trim();
+  if (name && num) {
+    const alreadyThere = name
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .includes(num.toLowerCase());
+    return alreadyThere ? name : `${name} ${num}`;
+  }
+  if (name) return name;
+  if (num) return `Room ${num}`;
+  return `Room ${index + 1}`;
+}
+
 export interface RoomSuggestion {
   wall: LengthRead;
   height: PanelHeight;

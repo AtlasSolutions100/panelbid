@@ -7,6 +7,7 @@ import {
   amountInWords,
   computeCosts,
   readTypedAmount,
+  roomLabel,
   roundToCents,
   type CostInput,
   type RoomRow,
@@ -47,21 +48,6 @@ export interface RoomTexture {
 function joinWithAnd(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
-}
-
-function roomLabel(row: RoomRow, index: number): string {
-  const name = clean(row.roomName);
-  const num = clean(row.roomNumber);
-  if (name && num) {
-    const alreadyThere = name
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .includes(num.toLowerCase());
-    return alreadyThere ? name : `${name} ${num}`;
-  }
-  if (name) return name;
-  if (num) return `Room ${num}`;
-  return `Room ${index + 1}`;
 }
 
 function textureFor(

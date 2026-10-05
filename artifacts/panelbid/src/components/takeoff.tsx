@@ -38,7 +38,8 @@ import {
 } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
-import { Plus, Trash2, Save, Calculator, Upload, FileText, Sparkles, Loader2, ChevronDown } from "lucide-react"
+import { Plus, Trash2, Save, Calculator, Upload, FileText, Sparkles, Loader2, ChevronDown, ClipboardList } from "lucide-react"
+import { MaterialListDialog } from "@/components/material-list"
 
 // Every takeoff rule (wall lengths, sheets, cost lines, the total) comes from
 // the shared rules file. No rule is written in this page.
@@ -50,6 +51,7 @@ import {
   PROFIT_PER_DAY,
   PROFIT_FLAT_MAX_SHEETS,
   applySuggestions,
+  buildMaterialList,
   computeCosts,
   flatProfitApplies,
   glueBuckets,
@@ -411,6 +413,28 @@ export function TakeoffSection({
   // Moldings by length (his rule) and glue buckets (his rule), with their working.
   const moldings = useMemo(() => moldingLines(sheetRows), [sheetRows])
 
+  // The Material list: the same quantities as a sheet to print or send.
+  const [materialListOpen, setMaterialListOpen] = useState(false)
+  const materialList = useMemo(
+    () =>
+      buildMaterialList({
+        jobName: job.jobName,
+        address: job.address,
+        city: job.city,
+        // the shop's own calendar day (Rocklin, CA)
+        date: new Date().toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+          timeZone: "America/Los_Angeles",
+        }),
+        thickness,
+        roomRows,
+        sheetRows,
+      }),
+    [job.jobName, job.address, job.city, thickness, roomRows, sheetRows],
+  )
+
   const addRoomRow = () =>
     changeRooms([
       ...roomRows,
@@ -505,6 +529,16 @@ export function TakeoffSection({
           >
             {unsaved ? "Changes not saved" : "Saved"}
           </span>
+          <Button
+            variant="outline"
+            onClick={() => setMaterialListOpen(true)}
+            size="sm"
+            className="font-mono uppercase tracking-wider text-xs"
+            data-testid="button-open-material-list"
+          >
+            <ClipboardList className="mr-2 h-4 w-4" />
+            Material List
+          </Button>
           <Button
             onClick={handleSave}
             disabled={saveTakeoff.isPending}
@@ -610,7 +644,7 @@ export function TakeoffSection({
                       onChange={(e) => updateRoomRow(i, { manufacturer: e.target.value })} />
                   </td>
                   <td className="p-2">
-                    <Input className={`${inputCls} w-24`} value={row.color ?? ""} placeholder="—"
+                    <Input className={`${inputCls} w-24`} value={row.color ?? ""} placeholder="—" data-testid={`input-color-${i}`}
                       onChange={(e) => updateRoomRow(i, { color: e.target.value })} />
                   </td>
                   <td className="p-2">
@@ -618,7 +652,7 @@ export function TakeoffSection({
                       onChange={(e) => updateRoomRow(i, { productCode: e.target.value })} />
                   </td>
                   <td className="p-2">
-                    <Input className={`${inputCls} w-24`} value={row.fireRating ?? ""} placeholder="—"
+                    <Input className={`${inputCls} w-24`} value={row.fireRating ?? ""} placeholder="—" data-testid={`input-fire-rating-${i}`}
                       onChange={(e) => updateRoomRow(i, { fireRating: e.target.value })} />
                   </td>
                   <td className="p-2">
@@ -1056,7 +1090,7 @@ export function TakeoffSection({
                         reset to auto ({money(totals.autoProfit)})
                       </button>
                     ) : (
-                      <span>auto: {flatProfitApplies(totals.totalSheets) ? `$${PROFIT_FLAT} flat (${PROFIT_FLAT_MAX_SHEETS} sheets and under)` : `$${PROFIT_PER_DAY}/day (more than ${PROFIT_FLAT_MAX_SHEETS} sheets)`}</span>
+                      <span data-testid="text-profit-rule">auto: {flatProfitApplies(totals.totalSheets) ? `$${PROFIT_FLAT} flat (${PROFIT_FLAT_MAX_SHEETS} sheets and under)` : `$${PROFIT_PER_DAY}/day (more than ${PROFIT_FLAT_MAX_SHEETS} sheets)`}</span>
                     )}
                   </div>
                 </dt>
@@ -1090,6 +1124,12 @@ export function TakeoffSection({
           </div>
         </div>
       </CardContent>
+      <MaterialListDialog
+        list={materialList}
+        open={materialListOpen}
+        onOpenChange={setMaterialListOpen}
+        unsaved={unsaved}
+      />
     </Card>
   )
 }
