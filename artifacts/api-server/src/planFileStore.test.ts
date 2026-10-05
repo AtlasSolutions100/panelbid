@@ -44,6 +44,12 @@ vi.mock("node:child_process", async (importOriginal) => {
   const { writeFile } = await import("node:fs/promises");
   const realRun = promisify(real.execFile);
   const standIn = async (file: string, args: string[]) => {
+    const known = file === "pdfinfo" || file === "pdftoppm";
+    // The look "can it be started?" (lib/pdfTools.ts): yes.
+    if (known && args.length === 1 && args[0] === "-v") {
+      return { stdout: "", stderr: `${file} version 24.02.0
+` };
+    }
     if (file === "pdfinfo") {
       return {
         stdout: "Pages:          1\nPage    1 size: 612 x 792 pts (letter)\nPage    1 rot:  0\n",

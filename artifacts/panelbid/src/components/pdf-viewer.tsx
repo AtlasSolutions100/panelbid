@@ -3,6 +3,7 @@ import { Document, Page, pdfjs } from "react-pdf"
 import pdfWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url"
 import { Download, FileWarning, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { responseSentence } from "@/lib/server-words"
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc
 
@@ -20,6 +21,8 @@ interface PdfViewerProps {
 export function PdfViewer({ url, downloadUrl }: PdfViewerProps) {
   const [numPages, setNumPages] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // False when the file itself is gone: a download would fail the same way.
+  const [canDownload, setCanDownload] = useState(true)
   const containerRef = useRef<HTMLDivElement>(null)
   const [pageWidth, setPageWidth] = useState<number | null>(null)
 
@@ -37,12 +40,14 @@ export function PdfViewer({ url, downloadUrl }: PdfViewerProps) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 p-8 text-center">
         <FileWarning className="h-10 w-10 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground max-w-sm">{error}</p>
-        <Button variant="outline" size="sm" asChild>
-          <a href={downloadUrl} target="_blank" rel="noreferrer" download>
-            <Download className="mr-2 h-4 w-4" /> Download instead
-          </a>
-        </Button>
+        <p className="text-sm text-muted-foreground max-w-sm" data-testid="pdf-viewer-error">{error}</p>
+        {canDownload && (
+          <Button variant="outline" size="sm" asChild>
+            <a href={downloadUrl} target="_blank" rel="noreferrer" download>
+              <Download className="mr-2 h-4 w-4" /> Download instead
+            </a>
+          </Button>
+        )}
       </div>
     )
   }
@@ -54,9 +59,19 @@ export function PdfViewer({ url, downloadUrl }: PdfViewerProps) {
         onLoadSuccess={({ numPages: n }) => setNumPages(n)}
         onLoadError={(err) => {
           console.error("PDF load error:", err)
-          setError(
-            "This PDF couldn't be loaded. The file may have been removed from the server.",
-          )
+          // Ask the server why: it answers with one plain sentence (a plan
+          // whose file is gone: "upload it again").
+          const fallback = "This PDF couldn't be shown. Try again, or download it instead."
+          fetch(url)
+            .then(async (response) => {
+              if (response.ok) {
+                setError(fallback)
+                return
+              }
+              setCanDownload(response.status !== 410)
+              setError(await responseSentence(response, fallback))
+            })
+            .catch(() => setError(fallback))
         }}
         loading={
           <div className="flex items-center justify-center gap-2 p-12 text-muted-foreground text-sm">

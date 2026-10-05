@@ -24,6 +24,8 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { NoticeLine } from "@/components/notice-line"
+import { serverSentence, useNotice } from "@/lib/server-words"
 import { Sparkles, Plus, Trash2, Pencil, Check, X, ClipboardList, AlertTriangle, CheckCircle2 } from "lucide-react"
 
 const MATERIAL_LABELS: Record<MaterialCategory, string> = {
@@ -113,24 +115,38 @@ export function RoomSpecsSection({ job }: { job: Job }) {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [draft, setDraft] = useState<Draft>({})
   const [adding, setAdding] = useState(false)
+  // Why the last room reading did not work (or what it left out). It stays
+  // on the job until the next try.
+  const [extractNotice, setExtractNotice] = useNotice(`extract-specs.${jobId}`)
 
   const invalidateSpecs = () =>
     queryClient.invalidateQueries({ queryKey: getListRoomSpecsQueryKey(jobId) })
 
   const handleExtract = () => {
+    setExtractNotice(null)
     extractSpecs.mutate(
       { jobId },
       {
         onSuccess: (result) => {
           invalidateSpecs()
           const hadFailures = result.pagesFailed > 0 || result.filesFailed > 0
+          // The server names the pages and plans it had to leave out.
+          if (result.warning) setExtractNotice({ kind: "warning", text: result.warning })
           toast({
             title: hadFailures ? "Spec extraction finished with warnings" : "Spec extraction complete",
             variant: hadFailures ? "destructive" : undefined,
             description: `${result.roomsExtracted} room${result.roomsExtracted === 1 ? "" : "s"} extracted from ${result.pagesProcessed} of ${result.candidatePages} candidate page${result.candidatePages === 1 ? "" : "s"}${result.ambiguousRooms > 0 ? ` — ${result.ambiguousRooms} need review` : ""}${result.pagesFailed > 0 ? ` — ${result.pagesFailed} page${result.pagesFailed === 1 ? "" : "s"} could not be processed (existing rows kept)` : ""}${result.filesFailed > 0 ? ` — ${result.filesFailed} file${result.filesFailed === 1 ? "" : "s"} could not be read` : ""}`,
           })
         },
-        onError: () => toast({ title: "Extraction failed", variant: "destructive" }),
+        onError: (err) => {
+          // The server says why, in one sentence: show it, and keep it.
+          const why = serverSentence(
+            err,
+            "The room reading did not work and the server did not say why. Try again.",
+          )
+          setExtractNotice({ kind: "failed", text: why })
+          toast({ title: "Room reading did not work", description: why, variant: "destructive" })
+        },
       },
     )
   }
@@ -278,6 +294,7 @@ export function RoomSpecsSection({ job }: { job: Job }) {
         </div>
       </CardHeader>
       <CardContent className="p-0">
+        <NoticeLine notice={extractNotice} testId="extract-notice" />
         {suggestedManufacturers.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-border/40 bg-blue-500/5">
             <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">

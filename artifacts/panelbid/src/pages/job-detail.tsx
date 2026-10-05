@@ -32,6 +32,11 @@ import { RoomSpecsSection } from "@/components/room-specs"
 import { TakeoffSection } from "@/components/takeoff"
 import { ProposalSection } from "@/components/proposal"
 import { PdfViewer } from "@/components/pdf-viewer"
+import { NoticeLine } from "@/components/notice-line"
+import { responseSentence, serverSentence, useNotice } from "@/lib/server-words"
+
+// The same limit the server has (lib/planFileStore.ts).
+const MAX_PLAN_FILE_MB = 50
 
 export default function JobDetail() {
   const [, params] = useRoute("/jobs/:id")
@@ -48,6 +53,10 @@ export default function JobDetail() {
   // True while the takeoff on screen differs from the saved one. The proposal
   // is only made from a saved takeoff, so it needs to know.
   const [takeoffUnsaved, setTakeoffUnsaved] = useState(false)
+  // Why the last upload / the last keyword scan did not work. Each stays on
+  // the job until the next try.
+  const [uploadNotice, setUploadNotice] = useNotice(`upload.${id}`)
+  const [scanNotice, setScanNotice] = useNotice(`scan.${id}`)
 
   const { data: job, isLoading: isLoadingJob } = useGetJob(id, {
     query: { enabled: !!id, queryKey: getGetJobQueryKey(id) }
@@ -78,19 +87,24 @@ export default function JobDetail() {
   const rescanJob = useRescanJob()
 
   const handleRescan = () => {
+    setScanNotice(null)
     rescanJob.mutate(
       { jobId: id },
       {
         onSuccess: (result) => {
           queryClient.invalidateQueries({ queryKey: getListPlanScansQueryKey(id) })
           queryClient.invalidateQueries({ queryKey: getListJobFilesQueryKey(id) })
+          // The server names a plan it had to leave out.
+          if (result.warning) setScanNotice({ kind: "warning", text: result.warning })
           toast({
             title: "Scan complete",
             description: `${result.matchCount} match${result.matchCount === 1 ? "" : "es"} across ${result.filesScanned} file${result.filesScanned === 1 ? "" : "s"}${result.filesNeedingOcr > 0 ? ` — ${result.filesNeedingOcr} file(s) need OCR` : ""}`,
           })
         },
-        onError: () => {
-          toast({ title: "Scan failed", variant: "destructive" })
+        onError: (err) => {
+          const why = serverSentence(err, "The keyword scan did not work and the server did not say why. Try again.")
+          setScanNotice({ kind: "failed", text: why })
+          toast({ title: "Scan did not work", description: why, variant: "destructive" })
         }
       }
     )
@@ -149,11 +163,21 @@ export default function JobDetail() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    if (file.type !== "application/pdf") {
-      toast({ title: "Invalid file type", description: "Only PDF files are accepted", variant: "destructive" })
+    const refuse = (why: string) => {
+      setUploadNotice({ kind: "failed", text: why })
+      toast({ title: "Upload did not work", description: why, variant: "destructive" })
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    }
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      refuse("That file is not a PDF. Plans must be PDF files.")
+      return
+    }
+    if (file.size > MAX_PLAN_FILE_MB * 1024 * 1024) {
+      refuse(`This file is too big. The limit is ${MAX_PLAN_FILE_MB} MB.`)
       return
     }
 
+    setUploadNotice(null)
     setIsUploading(true)
     try {
       const formData = new FormData()
@@ -165,7 +189,9 @@ export default function JobDetail() {
       })
 
       if (!response.ok) {
-        throw new Error("Upload failed")
+        // The server says why, in one sentence.
+        refuse(await responseSentence(response, "The upload did not work and the server did not say why. Try again."))
+        return
       }
 
       queryClient.invalidateQueries({ queryKey: getListJobFilesQueryKey(id) })
@@ -176,7 +202,7 @@ export default function JobDetail() {
         queryClient.invalidateQueries({ queryKey: getListJobFilesQueryKey(id) })
       }, 4000)
     } catch (error) {
-      toast({ title: "Upload failed", description: "Could not upload the file. Please try again.", variant: "destructive" })
+      refuse("The upload did not reach the server. Check your connection and try again.")
     } finally {
       setIsUploading(false)
       if (fileInputRef.current) {
@@ -308,6 +334,7 @@ export default function JobDetail() {
               </div>
             </CardHeader>
             <CardContent className="p-0 flex-1 flex flex-col">
+              <NoticeLine notice={uploadNotice} testId="upload-notice" />
               {isLoadingFiles ? (
                 <div className="p-8 text-center text-muted-foreground">Loading files...</div>
               ) : files && files.length > 0 ? (
@@ -399,6 +426,7 @@ export default function JobDetail() {
               </Button>
             </CardHeader>
             <CardContent className="p-0">
+              <NoticeLine notice={scanNotice} testId="scan-notice" />
               {isLoadingScans ? (
                 <div className="p-8 text-center text-muted-foreground">Loading scan results...</div>
               ) : scanGroups.length > 0 ? (
