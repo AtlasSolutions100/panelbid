@@ -78,7 +78,15 @@ router.post("/jobs/:jobId/scan", async (req, res): Promise<void> => {
     throw err;
   }
   req.log.info({ jobId: job.id, ...result }, "Job rescan complete");
-  res.json(RescanJobResponse.parse(result));
+
+  // Plans left out because their file is gone are named, in one sentence.
+  const { filesNotThere, ...counts } = result;
+  const gone = files.filter((f) => filesNotThere.includes(f.id)).map((f) => f.fileName);
+  const warning =
+    gone.length > 0
+      ? `Not scanned: ${gone.join(", ")} ${gone.length === 1 ? "is" : "are"} no longer on the server. Upload ${gone.length === 1 ? "it" : "them"} again.`
+      : undefined;
+  res.json(RescanJobResponse.parse({ ...counts, ...(warning ? { warning } : {}) }));
 });
 
 export default router;

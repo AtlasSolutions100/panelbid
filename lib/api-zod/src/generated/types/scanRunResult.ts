@@ -10,4 +10,6 @@ export interface ScanRunResult {
   filesScanned: number;
   matchCount: number;
   filesNeedingOcr: number;
+  /** Set when a plan was left out because its file is no longer on the server. One plain sentence naming it, to show as it is */
+  warning?: string;
 }

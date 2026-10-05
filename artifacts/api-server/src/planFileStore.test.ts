@@ -140,6 +140,7 @@ describe.skipIf(!haveDatabase)("a plan file is kept in the database", () => {
   }
 
   beforeAll(async () => {
+    delete process.env.POPPLER_BIN_DIR; // only the stand-ins above are found
     uploadDir = makeUploadDir();
     running = await startApp({ databaseUrl: (database as { url: string }).url, uploadDir });
     cookie = await signIn(running);

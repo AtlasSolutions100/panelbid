@@ -20,11 +20,9 @@ import {
   startPriceExtraction,
   isPriceExtractionRunning,
 } from "../lib/priceSheetExtractor";
-import {
-  isPlanFileError,
-  planFileErrorBody,
-  planFilePath,
-} from "../lib/planFileStore";
+import { planFilePath } from "../lib/planFileStore";
+import { requirePdfTools } from "../lib/pdfTools";
+import { describeFailure } from "../lib/readingFailures";
 
 const router: IRouter = Router();
 
@@ -97,17 +95,20 @@ router.post("/files/:fileId/extract-prices", async (req, res): Promise<void> => 
     return;
   }
 
-  // The reading itself runs after this answer. A plan whose file cannot be
-  // had is refused here, in words (gone: 410), instead of failing unseen.
+  // The reading itself runs after this answer. What can be known now is
+  // refused here, in words, instead of failing unseen: a plan whose file
+  // cannot be had (gone: 410), a server without its PDF tools (503).
   try {
     await planFilePath(file);
+    await requirePdfTools();
   } catch (err) {
-    if (isPlanFileError(err)) {
-      req.log.warn({ fileId: file.id, code: err.code }, "Price extraction refused: the plan file cannot be had");
-      res.status(err.status).json(planFileErrorBody(err));
-      return;
-    }
-    throw err;
+    const failure = describeFailure(err);
+    req.log[failure.ours ? "error" : "warn"](
+      { fileId: file.id, code: failure.body.code, reason: (err as { reason?: unknown }).reason },
+      "Price extraction refused before it started",
+    );
+    res.status(failure.status).json(failure.body);
+    return;
   }
 
   const started = startPriceExtraction(file);

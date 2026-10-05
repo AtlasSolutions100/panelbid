@@ -28,7 +28,11 @@ import {
   parseSourcePages,
   SPEC_EXTRACT_LOCK_NS,
 } from "../lib/specExtractor";
-import { isPlanFileError, planFileErrorBody } from "../lib/planFileStore";
+import {
+  READING_FAILURES,
+  ReadingFailure,
+  describeFailure,
+} from "../lib/readingFailures";
 
 const router: IRouter = Router();
 
@@ -87,9 +91,10 @@ router.post("/jobs/:jobId/extract-specs", async (req, res): Promise<void> => {
     return;
   }
   if (extractionInFlight.has(job.id)) {
-    res
-      .status(409)
-      .json({ message: "Spec extraction is already running for this job" });
+    res.status(READING_FAILURES.already_running.status).json({
+      code: "already_running",
+      message: READING_FAILURES.already_running.message,
+    });
     return;
   }
   const files = await db
@@ -100,20 +105,27 @@ router.post("/jobs/:jobId/extract-specs", async (req, res): Promise<void> => {
   extractionInFlight.add(job.id);
   try {
     const result = await extractSpecsForJob(job.id, files);
-    req.log.info({ jobId: job.id, ...result }, "Spec extraction complete");
+    const { warning, ...counts } = result;
+    req.log.info(
+      { jobId: job.id, ...counts, leftOut: warning !== undefined },
+      "Spec extraction complete",
+    );
     res.json(ExtractSpecsResponse.parse(result));
   } catch (err) {
-    // A plan whose file cannot be had: its own status and sentence (gone: 410).
-    if (isPlanFileError(err)) {
-      req.log.warn({ jobId: job.id, code: err.code }, "Spec extraction: no plan file could be had");
-      res.status(err.status).json(planFileErrorBody(err));
-      return;
-    }
-    req.log.error({ err, jobId: job.id }, "Spec extraction failed");
-    res.status(500).json({
-      message:
-        err instanceof Error ? err.message : "Spec extraction failed",
-    });
+    // Every failure has a status and ONE plain sentence; what really
+    // happened is written to the log, never sent.
+    const failure = describeFailure(err);
+    const detail =
+      err instanceof ReadingFailure
+        ? err.detail
+        : failure.body.code === "server_fault"
+          ? err
+          : (err as { reason?: unknown }).reason;
+    req.log[failure.ours ? "error" : "warn"](
+      { err: detail, jobId: job.id, code: failure.body.code, status: failure.status },
+      "Spec extraction failed",
+    );
+    res.status(failure.status).json(failure.body);
   } finally {
     extractionInFlight.delete(job.id);
   }

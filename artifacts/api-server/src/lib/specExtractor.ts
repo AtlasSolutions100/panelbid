@@ -1,6 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,8 +17,15 @@ import {
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "./logger";
 import { isPlanFileError, planFilePath } from "./planFileStore";
-
-const execFileAsync = promisify(execFile);
+import { PdfToolsMissingError, runPdfTool } from "./pdfTools";
+import {
+  ReadingFailure,
+  askAi,
+  namePages,
+  pageFailureCode,
+  readAiAnswer,
+  type FailedPage,
+} from "./readingFailures";
 
 // Advisory lock namespace for spec extraction (distinct from plan-scan ns).
 // Shared by extraction and all room-spec row writes so concurrent edits can't
@@ -55,6 +60,8 @@ export interface CandidateDetection {
   filesNotThere: number[];
   /** The first plan-file error met, kept to throw when nothing could be read. */
   fileProblem: unknown;
+  /** Plans with no text on any page (scans): nothing to look for in them. */
+  filesWithoutText: number[];
 }
 
 async function extractPdfPages(buffer: Buffer): Promise<string[]> {
@@ -95,6 +102,7 @@ export async function detectCandidatePages(
   const candidates: CandidatePage[] = [];
   const failedFileIds: number[] = [];
   const filesNotThere: number[] = [];
+  const filesWithoutText: number[] = [];
   let fileProblem: unknown = null;
   for (const file of files) {
     // Every plan is looked for first, also one marked "needs OCR": a plan
@@ -108,7 +116,10 @@ export async function detectCandidatePages(
       filesNotThere.push(file.id);
       continue;
     }
-    if (file.needsOcr) continue;
+    if (file.needsOcr) {
+      filesWithoutText.push(file.id);
+      continue;
+    }
     let pages: string[];
     try {
       pages = await extractPdfPages(await readFile(onDisk));
@@ -117,6 +128,7 @@ export async function detectCandidatePages(
       failedFileIds.push(file.id);
       continue;
     }
+    if (!pages.some((page) => page.length > 0)) filesWithoutText.push(file.id);
     for (let p = 0; p < pages.length; p++) {
       const text = pages[p]!.toLowerCase();
       if (!text) continue;
@@ -159,7 +171,7 @@ export async function detectCandidatePages(
     }
   });
 
-  return { candidates, failedFileIds, filesNotThere, fileProblem };
+  return { candidates, failedFileIds, filesNotThere, fileProblem, filesWithoutText };
 }
 
 /** Run pdftoppm for one page and return the produced JPEG buffer. */
@@ -171,7 +183,7 @@ async function runPdftoppm(
   const dir = await mkdtemp(join(tmpdir(), "specpage-"));
   try {
     const prefix = join(dir, "page");
-    await execFileAsync("pdftoppm", [
+    await runPdfTool("pdftoppm", [
       "-jpeg",
       "-f",
       String(pageNumber),
@@ -203,7 +215,7 @@ async function getPageSizePoints(
   pageNumber: number,
 ): Promise<{ width: number; height: number }> {
   try {
-    const { stdout } = await execFileAsync("pdfinfo", [
+    const { stdout } = await runPdfTool("pdfinfo", [
       "-f",
       String(pageNumber),
       "-l",
@@ -220,8 +232,10 @@ async function getPageSizePoints(
       }
       return { width, height };
     }
-  } catch {
-    // fall through to default
+  } catch (err) {
+    // A missing program is not "size unknown": the readers cannot work.
+    if (err instanceof PdfToolsMissingError) throw err;
+    // anything else: fall through to default
   }
   return { width: 2592, height: 1728 };
 }
@@ -410,7 +424,7 @@ Respond with ONLY strict JSON (no markdown fences, no commentary) in this exact 
 async function extractFromPage(
   images: Buffer[],
 ): Promise<z.infer<typeof ExtractionPayload>> {
-  const message = await anthropic.messages.create({
+  const message = await askAi(() => anthropic.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [
@@ -436,18 +450,20 @@ async function extractFromPage(
         ],
       },
     ],
+  }));
+  return readAiAnswer(() => {
+    const block = message.content[0];
+    const text = block && block.type === "text" ? block.text : "";
+    // Strip accidental code fences / prose preamble before parsing: keep the
+    // outermost JSON object only.
+    const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start === -1 || end <= start) {
+      throw new Error("Model response contained no JSON object");
+    }
+    return ExtractionPayload.parse(JSON.parse(cleaned.slice(start, end + 1)));
   });
-  const block = message.content[0];
-  const text = block && block.type === "text" ? block.text : "";
-  // Strip accidental code fences / prose preamble before parsing: keep the
-  // outermost JSON object only.
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start === -1 || end <= start) {
-    throw new Error("Model response contained no JSON object");
-  }
-  return ExtractionPayload.parse(JSON.parse(cleaned.slice(start, end + 1)));
 }
 
 /**
@@ -740,44 +756,52 @@ export interface SpecExtractionResult {
   filesFailed: number;
   roomsExtracted: number;
   ambiguousRooms: number;
+  /**
+   * Set when something was left out of a run that otherwise worked: one
+   * plain sentence naming the pages and plans, and why. Shown as it is.
+   */
+  warning?: string;
 }
 
 /**
  * Full pipeline: detect candidate pages, render each to an image, extract
  * room specs with Claude vision, and replace the job's room_specs rows.
+ *
+ * A run that reads nothing throws, with the reason as a status and one
+ * sentence (lib/readingFailures.ts, lib/planFileStore.ts, lib/pdfTools.ts)
+ * and without touching the rows already there. A run that reads some pages
+ * and not others is a success with the counts and a warning that names
+ * what was left out.
  */
 export async function extractSpecsForJob(
   jobId: number,
   files: JobFile[],
 ): Promise<SpecExtractionResult> {
-  const { candidates, failedFileIds, fileProblem } = await detectCandidatePages(
-    jobId,
-    files,
-  );
+  if (files.length === 0) throw new ReadingFailure("no_plan");
 
-  // Nothing to read and a plan whose file cannot be had: that is the reason
-  // (gone is 410, "upload it again"), before anything else is said.
-  if (candidates.length === 0 && fileProblem) throw fileProblem;
+  const { candidates, failedFileIds, filesNotThere, fileProblem, filesWithoutText } =
+    await detectCandidatePages(jobId, files);
 
-  // If detection itself failed on some files and produced nothing trustworthy,
-  // abort before touching existing data — this is a failed run, not "no specs".
-  if (candidates.length === 0 && failedFileIds.length > 0) {
-    throw new Error(
-      `Spec extraction failed: candidate detection could not read ${failedFileIds.length} file(s) and found no finish-schedule pages`,
-    );
-  }
-
-  // Genuinely no candidate pages found: leave existing rows untouched.
+  // No page to read. Existing rows are left untouched, and the person is
+  // told why, most pressing reason first.
   if (candidates.length === 0) {
-    return {
-      candidatePages: 0,
-      pagesProcessed: 0,
-      pagesFailed: 0,
-      filesFailed: 0,
-      roomsExtracted: 0,
-      ambiguousRooms: 0,
-    };
+    // A plan whose file cannot be had (gone is 410, "upload it again").
+    if (fileProblem) throw fileProblem;
+    // A PDF that could not be opened at all.
+    if (failedFileIds.length > 0) {
+      throw new ReadingFailure(
+        "plan_unreadable",
+        `candidate detection could not read ${failedFileIds.length} file(s) and found no finish-schedule pages`,
+      );
+    }
+    // Only scans: there is no text to find a schedule in.
+    if (filesWithoutText.length === files.length) throw new ReadingFailure("no_text");
+    // Text, but nothing that looks like a finish schedule.
+    throw new ReadingFailure("no_schedule_page");
   }
+
+  const nameOf = new Map(files.map((f) => [f.id, f.fileName] as const));
+  const failedPages: FailedPage[] = [];
 
   let pagesProcessed = 0;
   let anyFireRatingSeen = false;
@@ -798,10 +822,13 @@ export async function extractSpecsForJob(
 
   for (const candidate of candidates) {
     try {
-      const images = await renderPageImages(
-        candidate.filePath,
-        candidate.pageNumber,
-      );
+      let images: Buffer[];
+      try {
+        images = await renderPageImages(candidate.filePath, candidate.pageNumber);
+      } catch (err) {
+        if (err instanceof PdfToolsMissingError) throw err;
+        throw new ReadingFailure("page_not_rendered", err);
+      }
       const payload = await extractFromPage(images);
       pagesProcessed++;
       processedPages.push({
@@ -843,9 +870,30 @@ export async function extractSpecsForJob(
         });
       }
     } catch (err) {
+      // A missing program fails every page the same way: stop at the first
+      // one instead of trying them all and reporting "0 of 40".
+      if (err instanceof PdfToolsMissingError) {
+        logger.error(
+          { jobId, fileId: candidate.file.id, page: candidate.pageNumber, reason: err.reason },
+          "Spec extraction stopped: a PDF tool is missing on this server",
+        );
+        throw err;
+      }
       pagesFailed++;
+      const code = pageFailureCode(err);
+      failedPages.push({
+        fileName: nameOf.get(candidate.file.id) ?? "a plan",
+        pageNumber: candidate.pageNumber,
+        code,
+      });
       logger.error(
-        { err, jobId, fileId: candidate.file.id, page: candidate.pageNumber },
+        {
+          err: err instanceof ReadingFailure ? err.detail : err,
+          code,
+          jobId,
+          fileId: candidate.file.id,
+          page: candidate.pageNumber,
+        },
         "Spec extraction failed for page",
       );
     }
@@ -873,8 +921,10 @@ export async function extractSpecsForJob(
   // If we found candidate pages but every single one failed to process,
   // fail loudly instead of silently wiping previously extracted data.
   if (candidates.length > 0 && pagesProcessed === 0) {
-    throw new Error(
-      `Spec extraction failed: 0 of ${candidates.length} candidate pages could be processed`,
+    // The reason given is the first page's (all pages usually fail alike).
+    throw new ReadingFailure(
+      failedPages[0]?.code ?? "page_not_read",
+      `0 of ${candidates.length} candidate pages could be processed`,
     );
   }
 
@@ -924,13 +974,31 @@ export async function extractSpecsForJob(
     }
   });
 
+  // What was left out of a run that otherwise worked, in one sentence.
+  const leftOut: string[] = [];
+  if (failedPages.length > 0) {
+    leftOut.push(
+      `Not read: ${namePages(failedPages)}. Rows already there for ${failedPages.length === 1 ? "that page" : "those pages"} were kept.`,
+    );
+  }
+  const namesOf = (ids: number[]) => ids.map((id) => nameOf.get(id) ?? "a plan").join(", ");
+  if (filesNotThere.length > 0) {
+    leftOut.push(
+      `No longer on the server: ${namesOf(filesNotThere)}. Upload ${filesNotThere.length === 1 ? "it" : "them"} again.`,
+    );
+  }
+  if (failedFileIds.length > 0) {
+    leftOut.push(`Could not be opened: ${namesOf(failedFileIds)}.`);
+  }
+
   return {
     candidatePages: candidates.length,
     pagesProcessed,
     pagesFailed,
-    filesFailed: failedFileIds.length,
+    filesFailed: failedFileIds.length + filesNotThere.length,
     roomsExtracted: rows.length,
     ambiguousRooms: rows.filter((r) => r.extractionConfidence === "ambiguous")
       .length,
+    ...(leftOut.length > 0 ? { warning: leftOut.join(" ") } : {}),
   };
 }

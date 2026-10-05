@@ -211,7 +211,8 @@ export const RescanJobParams = zod.object({
 export const RescanJobResponse = zod.object({
   "filesScanned": zod.number(),
   "matchCount": zod.number(),
-  "filesNeedingOcr": zod.number()
+  "filesNeedingOcr": zod.number(),
+  "warning": zod.string().optional().describe('Set when a plan was left out because its file is no longer on the server. One plain sentence naming it, to show as it is')
 })
 
 
@@ -228,7 +229,8 @@ export const ExtractSpecsResponse = zod.object({
   "pagesFailed": zod.number().describe('Candidate pages that could not be processed this run; their previously extracted rows are left untouched'),
   "filesFailed": zod.number().describe('Files that could not be read during candidate detection; their previously extracted rows are left untouched'),
   "roomsExtracted": zod.number(),
-  "ambiguousRooms": zod.number()
+  "ambiguousRooms": zod.number(),
+  "warning": zod.string().optional().describe('Set when something was left out of a run that otherwise worked. One plain sentence naming the pages and plans and why, to show as it is')
 })
 
 

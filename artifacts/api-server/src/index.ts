@@ -16,6 +16,7 @@ import {
   seedExclusionTerms,
 } from "./lib/filterMigrations";
 import { runFileStoreSchemaMigration } from "./lib/fileStoreMigrations";
+import { checkPdfToolsAtStartup } from "./lib/pdfTools";
 
 const rawPort = process.env["PORT"];
 
@@ -90,6 +91,13 @@ async function main(): Promise<void> {
       "Sign-in is NOT set up: every request is refused until these settings are added (see SIGNIN-SETUP.md)",
     );
   }
+
+  // The room reader and the price-sheet reader need two PDF programs on the
+  // server. Say it once, loudly, when one is missing. The server still
+  // starts: the two readers refuse with a sentence until it is there.
+  await checkPdfToolsAtStartup().catch((err) => {
+    logger.error({ err }, "PDF tools check failed — continuing");
+  });
 
   // 3. Bind the HTTP listener only after migrations are complete.
   await new Promise<void>((resolve, reject) => {

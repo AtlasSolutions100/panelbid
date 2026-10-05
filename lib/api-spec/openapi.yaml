@@ -1533,6 +1533,9 @@ components:
           type: integer
         ambiguousRooms:
           type: integer
+        warning:
+          type: string
+          description: Set when something was left out of a run that otherwise worked. One plain sentence naming the pages and plans and why, to show as it is
       required: [candidatePages, pagesProcessed, pagesFailed, filesFailed, roomsExtracted, ambiguousRooms]
     ScanRunResult:
       type: object
@@ -1543,6 +1546,9 @@ components:
           type: integer
         filesNeedingOcr:
           type: integer
+        warning:
+          type: string
+          description: Set when a plan was left out because its file is no longer on the server. One plain sentence naming it, to show as it is
       required: [filesScanned, matchCount, filesNeedingOcr]
     Keyword:
       type: object

@@ -1,5 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
 import { z } from "zod/v4";
 import {
@@ -14,8 +12,15 @@ import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { renderPageImages } from "./specExtractor";
 import { logger } from "./logger";
 import { planFilePath } from "./planFileStore";
-
-const execFileAsync = promisify(execFile);
+import { PdfToolsMissingError, runPdfTool } from "./pdfTools";
+import {
+  ReadingFailure,
+  askAi,
+  failureSentence,
+  pageFailureCode,
+  readAiAnswer,
+  type ReadingFailureCode,
+} from "./readingFailures";
 
 // Files with a price extraction currently in flight — a second concurrent run
 // for the same file would race the first and interleave partial results.
@@ -62,7 +67,7 @@ Respond with ONLY strict JSON (no markdown fences, no commentary) in this exact 
 async function extractPricesFromPage(
   images: Buffer[],
 ): Promise<z.infer<typeof PricePagePayload>> {
-  const message = await anthropic.messages.create({
+  const message = await askAi(() => anthropic.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [
@@ -88,25 +93,35 @@ async function extractPricesFromPage(
         ],
       },
     ],
+  }));
+  return readAiAnswer(() => {
+    const block = message.content[0];
+    const text = block && block.type === "text" ? block.text : "";
+    const cleaned = text
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```\s*$/, "");
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start === -1 || end <= start) {
+      throw new Error("Model response contained no JSON object");
+    }
+    return PricePagePayload.parse(JSON.parse(cleaned.slice(start, end + 1)));
   });
-  const block = message.content[0];
-  const text = block && block.type === "text" ? block.text : "";
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```\s*$/, "");
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start === -1 || end <= start) {
-    throw new Error("Model response contained no JSON object");
-  }
-  return PricePagePayload.parse(JSON.parse(cleaned.slice(start, end + 1)));
 }
 
 async function getPageCount(pdfPath: string): Promise<number> {
-  const { stdout } = await execFileAsync("pdfinfo", [pdfPath]);
+  let stdout: string;
+  try {
+    ({ stdout } = await runPdfTool("pdfinfo", [pdfPath]));
+  } catch (err) {
+    // The program is missing: its own case. It ran and refused the file:
+    // the PDF cannot be opened.
+    if (err instanceof PdfToolsMissingError) throw err;
+    throw new ReadingFailure("plan_unreadable", err);
+  }
   const m = stdout.match(/^Pages:\s+(\d+)/m);
-  if (!m) throw new Error("Could not determine PDF page count");
+  if (!m) throw new ReadingFailure("plan_unreadable", "pdfinfo gave no page count");
   return parseInt(m[1]!, 10);
 }
 
@@ -139,10 +154,17 @@ async function runPriceExtraction(file: JobFile): Promise<void> {
   const items: InsertPriceSheetItem[] = [];
   let pagesProcessed = 0;
   let pagesFailed = 0;
+  let firstFailure: ReadingFailureCode | null = null;
 
   for (let page = 1; page <= maxPages; page++) {
     try {
-      const images = await renderPageImages(onDisk, page);
+      let images: Buffer[];
+      try {
+        images = await renderPageImages(onDisk, page);
+      } catch (err) {
+        if (err instanceof PdfToolsMissingError) throw err;
+        throw new ReadingFailure("page_not_rendered", err);
+      }
       const payload = await extractPricesFromPage(images);
       pagesProcessed++;
       for (const item of payload.items) {
@@ -169,17 +191,23 @@ async function runPriceExtraction(file: JobFile): Promise<void> {
         itemCount: items.length,
       });
     } catch (err) {
+      // A missing program fails every page the same way: stop at the first.
+      if (err instanceof PdfToolsMissingError) throw err;
       pagesFailed++;
+      const code = pageFailureCode(err);
+      firstFailure ??= code;
       logger.error(
-        { err, fileId: file.id, page },
+        { err: err instanceof ReadingFailure ? err.detail : err, code, fileId: file.id, page },
         "Price extraction failed for page",
       );
     }
   }
 
   if (pagesProcessed === 0) {
-    throw new Error(
-      `Price extraction failed: 0 of ${maxPages} pages could be processed`,
+    // The reason given is the first page's (all pages usually fail alike).
+    throw new ReadingFailure(
+      firstFailure ?? "page_not_read",
+      `0 of ${maxPages} pages could be processed`,
     );
   }
 
@@ -226,10 +254,18 @@ export function startPriceExtraction(file: JobFile): boolean {
       });
       await runPriceExtraction(file);
     } catch (err) {
-      logger.error({ err, fileId: file.id }, "Price extraction failed");
+      // What really happened goes to the log. What is stored is shown to a
+      // person, so it is one plain sentence, never the raw error text.
+      const detail =
+        err instanceof ReadingFailure
+          ? err.detail
+          : err instanceof PdfToolsMissingError
+            ? err.reason
+            : err;
+      logger.error({ err: detail, fileId: file.id }, "Price extraction failed");
       await upsertStatus(file.id, {
         status: "failed",
-        error: err instanceof Error ? err.message : "Price extraction failed",
+        error: failureSentence(err),
       }).catch(() => {});
     } finally {
       priceExtractionInFlight.delete(file.id);

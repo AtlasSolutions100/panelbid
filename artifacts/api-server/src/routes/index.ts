@@ -11,6 +11,7 @@ import priceSheetsRouter from "./priceSheets";
 import proposalsRouter from "./proposals";
 import gmailRouter from "./gmail";
 import contractorSourcesRouter from "./contractorSources";
+import systemRouter from "./system";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(priceSheetsRouter);
 router.use(proposalsRouter);
 router.use(gmailRouter);
 router.use(contractorSourcesRouter);
+router.use(systemRouter);
 
 export default router;

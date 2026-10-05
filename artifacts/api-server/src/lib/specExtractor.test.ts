@@ -229,8 +229,9 @@ describe("extractSpecsForJob non-destructive guarantees", () => {
       materialCategory: "frp",
     });
     const files = (await getFiles()).filter((f) => f.id === corruptFileId);
+    // The reason now reaches the person as one plain sentence.
     await expect(extractSpecsForJob(jobId, files)).rejects.toThrow(
-      /candidate detection could not read/,
+      /This plan.s PDF could not be opened/,
     );
     const specs = await specsForJob();
     expect(specs).toHaveLength(1);
@@ -329,8 +330,9 @@ describe("extractSpecsForJob non-destructive guarantees", () => {
     mockCreate.mockRejectedValue(new Error("simulated AI outage"));
 
     const files = (await getFiles()).filter((f) => f.id === goodFileId);
+    // Every page failed the same way: that way is the sentence given.
     await expect(extractSpecsForJob(jobId, files)).rejects.toThrow(
-      /0 of 2 candidate pages/,
+      /The AI reader did not answer/,
     );
     const specs = await specsForJob();
     expect(specs).toHaveLength(1);

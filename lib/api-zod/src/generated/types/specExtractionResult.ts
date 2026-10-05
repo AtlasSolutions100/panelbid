@@ -16,4 +16,6 @@ export interface SpecExtractionResult {
   filesFailed: number;
   roomsExtracted: number;
   ambiguousRooms: number;
+  /** Set when something was left out of a run that otherwise worked. One plain sentence naming the pages and plans and why, to show as it is */
+  warning?: string;
 }
