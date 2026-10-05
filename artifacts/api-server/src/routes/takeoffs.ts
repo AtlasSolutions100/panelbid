@@ -14,7 +14,12 @@ import {
   SaveTakeoffBody,
   SaveTakeoffResponse,
 } from "@workspace/api-zod";
-import { computeCosts, roundToCents } from "../lib/takeoffRules";
+import {
+  computeCosts,
+  draftRoomRows,
+  refreshSuggestedRows,
+  roundToCents,
+} from "../lib/takeoffRules";
 
 const router: IRouter = Router();
 
@@ -74,18 +79,9 @@ router.get("/jobs/:jobId/takeoff", async (req, res): Promise<void> => {
   const draft = {
     jobId,
     saved: false,
-    roomRows: specs.map((s) => ({
-      roomName: s.roomName,
-      roomNumber: s.roomNumber,
-      wallLengths: "",
-      // Prefer the resolved material height; fall back to ceiling height.
-      materialHeight: s.materialHeight ?? s.ceilingHeight,
-      manufacturer: s.manufacturer,
-      color: s.color,
-      productCode: s.productCode,
-      fireRating: s.fireRating,
-      moldingType: null,
-    })),
+    // The ceiling height rides beside the panel height and is never copied
+    // into it: a room with no panel height reads "assumed to ceiling".
+    roomRows: draftRoomRows(specs),
     sheetRows: [],
     priceSheetFileId: null,
     laborRate: 0,
@@ -115,6 +111,9 @@ router.put("/jobs/:jobId/takeoff", async (req, res): Promise<void> => {
     return;
   }
   const jobId = params.data.jobId;
+  // Suggested sheet rows are brought up to date with the rooms before they
+  // are stored. Rows the person typed are stored exactly as sent.
+  const sheetRows = refreshSuggestedRows(body.data.roomRows, body.data.sheetRows);
   const [job] = await db
     .select({ id: jobsTable.id, status: jobsTable.status })
     .from(jobsTable)
@@ -127,7 +126,7 @@ router.put("/jobs/:jobId/takeoff", async (req, res): Promise<void> => {
   const values = {
     jobId,
     roomRows: body.data.roomRows,
-    sheetRows: body.data.sheetRows,
+    sheetRows,
     priceSheetFileId: body.data.priceSheetFileId ?? null,
     laborRate: body.data.laborRate,
     laborDays: body.data.laborDays,
@@ -140,7 +139,7 @@ router.put("/jobs/:jobId/takeoff", async (req, res): Promise<void> => {
     // the browser sends is not trusted.
     totalPrice: roundToCents(
       computeCosts({
-        sheetRows: body.data.sheetRows,
+        sheetRows,
         laborRate: body.data.laborRate,
         laborDays: body.data.laborDays,
         laborHoursPerDay: body.data.laborHoursPerDay,

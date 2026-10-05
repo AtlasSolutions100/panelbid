@@ -41,6 +41,7 @@ export * from './roomSpec';
 export * from './roomSpecInput';
 export * from './scanRunResult';
 export * from './sheetSize';
+export * from './sheetsSource';
 export * from './specExtractionResult';
 export * from './takeoff';
 export * from './takeoffInput';

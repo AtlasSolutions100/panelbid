@@ -400,12 +400,15 @@ export const GetTakeoffResponse = zod.object({
   "color": zod.string().nullable(),
   "productCode": zod.string().nullable(),
   "fireRating": zod.string().nullable(),
-  "moldingType": zod.union([zod.enum(['aluminum', 'pvc']),zod.null()])
+  "moldingType": zod.union([zod.enum(['aluminum', 'pvc']),zod.null()]),
+  "ceilingHeight": zod.string().nullish().describe('The room\'s ceiling height. Used as the panel height, and marked \"assumed to ceiling\", when the room has no panel height')
 })),
   "sheetRows": zod.array(zod.object({
   "sheetsNeeded": zod.number(),
   "sheetSize": zod.enum(['4x4', '4x8', '4x10', '4x12']),
-  "pricePerSheet": zod.number()
+  "pricePerSheet": zod.number().describe('0 means no price has been typed (shown as \"not priced\")'),
+  "sheetsSource": zod.enum(['suggested', 'typed']).optional().describe('suggested: the count follows the wall lengths. typed (or absent): the person\'s own count, never changed for them'),
+  "moldingCount": zod.number().nullish().describe('Typed molding count for this row\'s molding length (the same number is kept on every row of that length). Null or absent means not typed')
 })),
   "priceSheetFileId": zod.number().nullable(),
   "laborRate": zod.number(),
@@ -439,12 +442,15 @@ export const SaveTakeoffBody = zod.object({
   "color": zod.string().nullable(),
   "productCode": zod.string().nullable(),
   "fireRating": zod.string().nullable(),
-  "moldingType": zod.union([zod.enum(['aluminum', 'pvc']),zod.null()])
+  "moldingType": zod.union([zod.enum(['aluminum', 'pvc']),zod.null()]),
+  "ceilingHeight": zod.string().nullish().describe('The room\'s ceiling height. Used as the panel height, and marked \"assumed to ceiling\", when the room has no panel height')
 })),
   "sheetRows": zod.array(zod.object({
   "sheetsNeeded": zod.number(),
   "sheetSize": zod.enum(['4x4', '4x8', '4x10', '4x12']),
-  "pricePerSheet": zod.number()
+  "pricePerSheet": zod.number().describe('0 means no price has been typed (shown as \"not priced\")'),
+  "sheetsSource": zod.enum(['suggested', 'typed']).optional().describe('suggested: the count follows the wall lengths. typed (or absent): the person\'s own count, never changed for them'),
+  "moldingCount": zod.number().nullish().describe('Typed molding count for this row\'s molding length (the same number is kept on every row of that length). Null or absent means not typed')
 })),
   "priceSheetFileId": zod.number().nullish(),
   "laborRate": zod.number(),
@@ -471,12 +477,15 @@ export const SaveTakeoffResponse = zod.object({
   "color": zod.string().nullable(),
   "productCode": zod.string().nullable(),
   "fireRating": zod.string().nullable(),
-  "moldingType": zod.union([zod.enum(['aluminum', 'pvc']),zod.null()])
+  "moldingType": zod.union([zod.enum(['aluminum', 'pvc']),zod.null()]),
+  "ceilingHeight": zod.string().nullish().describe('The room\'s ceiling height. Used as the panel height, and marked \"assumed to ceiling\", when the room has no panel height')
 })),
   "sheetRows": zod.array(zod.object({
   "sheetsNeeded": zod.number(),
   "sheetSize": zod.enum(['4x4', '4x8', '4x10', '4x12']),
-  "pricePerSheet": zod.number()
+  "pricePerSheet": zod.number().describe('0 means no price has been typed (shown as \"not priced\")'),
+  "sheetsSource": zod.enum(['suggested', 'typed']).optional().describe('suggested: the count follows the wall lengths. typed (or absent): the person\'s own count, never changed for them'),
+  "moldingCount": zod.number().nullish().describe('Typed molding count for this row\'s molding length (the same number is kept on every row of that length). Null or absent means not typed')
 })),
   "priceSheetFileId": zod.number().nullable(),
   "laborRate": zod.number(),

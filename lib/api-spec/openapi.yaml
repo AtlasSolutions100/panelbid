@@ -1295,8 +1295,14 @@ components:
           oneOf:
             - $ref: "#/components/schemas/MoldingType"
             - type: "null"
+        ceilingHeight:
+          type: [string, "null"]
+          description: The room's ceiling height. Used as the panel height, and marked "assumed to ceiling", when the room has no panel height
       required:
         [roomName, roomNumber, wallLengths, materialHeight, manufacturer, color, productCode, fireRating, moldingType]
+    SheetsSource:
+      type: string
+      enum: [suggested, typed]
     TakeoffSheetRow:
       type: object
       properties:
@@ -1306,6 +1312,14 @@ components:
           $ref: "#/components/schemas/SheetSize"
         pricePerSheet:
           type: number
+          description: 0 means no price has been typed (shown as "not priced")
+        sheetsSource:
+          allOf:
+            - $ref: "#/components/schemas/SheetsSource"
+          description: "suggested: the count follows the wall lengths. typed (or absent): the person's own count, never changed for them"
+        moldingCount:
+          type: [number, "null"]
+          description: Typed molding count for this row's molding length (the same number is kept on every row of that length). Null or absent means not typed
       required: [sheetsNeeded, sheetSize, pricePerSheet]
     Takeoff:
       type: object

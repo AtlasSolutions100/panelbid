@@ -18,7 +18,11 @@ import {
   GenerateProposalResponse,
 } from "@workspace/api-zod";
 import { buildProposalValues, sheetAllotment } from "../lib/proposalRules";
-import { amountInWords, roundToCents } from "../lib/takeoffRules";
+import {
+  amountInWords,
+  refreshSuggestedRows,
+  roundToCents,
+} from "../lib/takeoffRules";
 
 const router: IRouter = Router();
 
@@ -78,10 +82,16 @@ router.post(
       res.status(404).json({ message: "Job not found" });
       return;
     }
-    const [takeoff] = await db
+    const [savedTakeoff] = await db
       .select()
       .from(takeoffsTable)
       .where(eq(takeoffsTable.jobId, jobId));
+    // The sheet count and sizes come from the takeoff as it is now: suggested
+    // rows are worked out again from the rooms, never read from an old count.
+    const takeoff = savedTakeoff && {
+      ...savedTakeoff,
+      sheetRows: refreshSuggestedRows(savedTakeoff.roomRows, savedTakeoff.sheetRows),
+    };
     if (!takeoff) {
       res
         .status(409)

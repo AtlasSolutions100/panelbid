@@ -49,12 +49,15 @@ import {
   PROFIT_FLAT,
   PROFIT_PER_DAY,
   PROFIT_FLAT_MAX_SHEETS,
+  applySuggestions,
   computeCosts,
   flatProfitApplies,
-  linearFootage,
+  isSuggested,
+  refreshSuggestedRows,
   resolvePricePerSheet,
   sameJson,
   sheetAreaSqft,
+  suggestSheets,
 } from "@/lib/takeoff-rules"
 
 /** Everything on the takeoff sheet that a person types (the total is worked out). */
@@ -270,7 +273,13 @@ export function TakeoffSection({
   // Put a takeoff from the server on screen and remember it as "what is saved".
   const showTakeoff = (t: Takeoff) => {
     setRoomRows(t.roomRows)
-    setSheetRows(t.sheetRows)
+    // A saved takeoff keeps its rows (suggested ones follow the rooms). A new
+    // one starts with the suggestion for any wall lengths it already has.
+    setSheetRows(
+      t.saved
+        ? refreshSuggestedRows(t.roomRows, t.sheetRows)
+        : applySuggestions([], t.roomRows, t.sheetRows),
+    )
     setPriceSheetFileId(t.priceSheetFileId)
     setLaborRate(String(t.laborRate))
     setLaborDays(String(t.laborDays))
@@ -332,18 +341,28 @@ export function TakeoffSection({
     [sheetRows, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, profitOverride],
   )
 
+  // The suggested sheet count for each room and for the job, with its working.
+  const suggestion = useMemo(() => suggestSheets(roomRows), [roomRows])
+
+  // Any change to the rooms also brings the SUGGESTED sheet rows up to date.
+  // Rows the person typed are never touched (see applySuggestions).
+  const changeRooms = (next: TakeoffRoomRow[]) => {
+    setRoomRows(next)
+    setSheetRows((rows) => applySuggestions(roomRows, next, rows))
+  }
   const updateRoomRow = (i: number, patch: Partial<TakeoffRoomRow>) =>
-    setRoomRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
+    changeRooms(roomRows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
   const updateSheetRow = (i: number, patch: Partial<TakeoffSheetRow>) =>
     setSheetRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
 
   const addRoomRow = () =>
-    setRoomRows((rows) => [
-      ...rows,
-      { roomName: "", roomNumber: "", wallLengths: "", materialHeight: "", manufacturer: "", color: "", productCode: "", fireRating: "", moldingType: null },
+    changeRooms([
+      ...roomRows,
+      { roomName: "", roomNumber: "", wallLengths: "", materialHeight: "", ceilingHeight: "", manufacturer: "", color: "", productCode: "", fireRating: "", moldingType: null },
     ])
+  // A row he adds himself is his from the start.
   const addSheetRow = () =>
-    setSheetRows((rows) => [...rows, { sheetsNeeded: 0, sheetSize: "4x8", pricePerSheet: 0 }])
+    setSheetRows((rows) => [...rows, { sheetsNeeded: 0, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "typed" }])
 
   const handleSave = () => {
     saveTakeoff.mutate(
@@ -442,6 +461,10 @@ export function TakeoffSection({
         {/* Room measurements */}
         <div className="p-4 pb-2">
           <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Room Measurements</h3>
+          <p className="text-xs text-muted-foreground mt-1" data-testid="text-measure-rule">
+            Type each wall straight through doors and windows: that is the waste, so no extra waste is added and no opening is taken out.
+            Lengths can be feet (8.5) or feet and inches (8'-6"). Suggested sheets = wall length ÷ 4 ft, rounded up.
+          </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -451,7 +474,9 @@ export function TakeoffSection({
                 <th className="p-3">Rm #</th>
                 <th className="p-3">Wall Lengths (ft)</th>
                 <th className="p-3 text-right">Total LF</th>
-                <th className="p-3">Height</th>
+                <th className="p-3">Panel Height</th>
+                <th className="p-3">Ceiling Ht</th>
+                <th className="p-3">Suggested Sheets</th>
                 <th className="p-3">Manufacturer</th>
                 <th className="p-3">Color</th>
                 <th className="p-3">Product</th>
@@ -463,13 +488,15 @@ export function TakeoffSection({
             <tbody className="divide-y divide-border/40">
               {roomRows.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="p-6 text-center text-muted-foreground text-sm">
+                  <td colSpan={13} className="p-6 text-center text-muted-foreground text-sm">
                     No rooms yet. Rooms are pre-populated from confirmed Room Specs, or add rows manually.
                   </td>
                 </tr>
               )}
-              {roomRows.map((row, i) => (
-                <tr key={i} className="hover:bg-muted/20 transition-colors">
+              {roomRows.map((row, i) => {
+                const rs = suggestion.rooms[i]
+                return (
+                <tr key={i} className="hover:bg-muted/20 transition-colors align-top">
                   <td className="p-2">
                     <Input className={`${inputCls} min-w-[130px]`} value={row.roomName ?? ""} placeholder="Room" data-testid={`input-room-name-${i}`}
                       onChange={(e) => updateRoomRow(i, { roomName: e.target.value })} />
@@ -483,11 +510,40 @@ export function TakeoffSection({
                       onChange={(e) => updateRoomRow(i, { wallLengths: e.target.value })} />
                   </td>
                   <td className="p-2 text-right font-mono text-xs whitespace-nowrap" data-testid={`text-lf-${i}`}>
-                    {linearFootage(row.wallLengths) > 0 ? `${linearFootage(row.wallLengths)} LF` : "—"}
+                    {rs && rs.wall.units > 0 ? `${Number(rs.wall.feet.toFixed(2))} LF` : "—"}
+                    {rs && !rs.wall.ok && (
+                      <div className="text-[10px] text-destructive font-sans whitespace-normal max-w-[140px]" data-testid={`text-lf-unread-${i}`}>
+                        can't read "{rs.wall.unread[0]}"
+                      </div>
+                    )}
                   </td>
                   <td className="p-2">
-                    <Input className={`${inputCls} w-20`} value={row.materialHeight ?? ""} placeholder="—"
+                    <Input className={`${inputCls} w-20`} value={row.materialHeight ?? ""} placeholder="—" data-testid={`input-panel-height-${i}`}
                       onChange={(e) => updateRoomRow(i, { materialHeight: e.target.value })} />
+                    {rs?.height.assumed && (
+                      <div className="mt-1 text-[10px] font-medium text-amber-700 whitespace-nowrap" data-testid={`text-height-assumed-${i}`}>
+                        assumed to ceiling ({Number((rs.height.feet ?? 0).toFixed(2))} ft)
+                      </div>
+                    )}
+                    {rs && rs.height.source === "none" && (
+                      <div className="mt-1 text-[10px] text-muted-foreground max-w-[120px]" data-testid={`text-height-missing-${i}`}>
+                        {rs.height.note}
+                      </div>
+                    )}
+                  </td>
+                  <td className="p-2">
+                    <Input className={`${inputCls} w-20`} value={row.ceilingHeight ?? ""} placeholder="—" data-testid={`input-ceiling-height-${i}`}
+                      onChange={(e) => updateRoomRow(i, { ceilingHeight: e.target.value })} />
+                  </td>
+                  <td className="p-2 text-xs min-w-[190px]" data-testid={`text-room-suggestion-${i}`}>
+                    {rs && rs.sheets !== null ? (
+                      <>
+                        <div className="font-mono font-medium">{rs.sheets} × {rs.sheetSize}</div>
+                        <div className="text-[10px] text-muted-foreground">{rs.arithmetic}</div>
+                      </>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">{rs?.problem ?? "—"}</span>
+                    )}
                   </td>
                   <td className="p-2">
                     <Input className={`${inputCls} min-w-[100px]`} value={row.manufacturer ?? ""} placeholder="—"
@@ -522,13 +578,14 @@ export function TakeoffSection({
                   </td>
                   <td className="p-2 text-right">
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => setRoomRows((rows) => rows.filter((_, idx) => idx !== i))}>
+                      onClick={() => changeRooms(roomRows.filter((_, idx) => idx !== i))}>
                       <Trash2 className="h-3.5 w-3.5" />
                       <span className="sr-only">Remove room</span>
                     </Button>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -697,18 +754,38 @@ export function TakeoffSection({
               {sheetRows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="p-6 text-center text-muted-foreground text-sm">
-                    No sheet rows yet. Add a row per sheet size/price. Enter prices manually from the manufacturer price sheet.
+                    No sheet rows yet. Type wall lengths above and the suggested sheets appear here, or add a row yourself.
                   </td>
                 </tr>
               )}
               {sheetRows.map((row, i) => (
-                <tr key={i} className="hover:bg-muted/20 transition-colors">
+                <tr key={i} className="hover:bg-muted/20 transition-colors align-top">
                   <td className="p-2">
-                    <Input type="number" min={0} className={`${inputCls} w-28 font-mono`} value={row.sheetsNeeded} data-testid={`input-sheets-needed-${i}`}
-                      onChange={(e) => updateSheetRow(i, { sheetsNeeded: num(e.target.value) })} />
+                    <div className="flex items-center gap-2">
+                      {/* Typing a count makes the row his: it is never changed for him again. */}
+                      <Input type="number" min={0} className={`${inputCls} w-24 font-mono`} value={row.sheetsNeeded} data-testid={`input-sheets-needed-${i}`}
+                        onChange={(e) => updateSheetRow(i, { sheetsNeeded: num(e.target.value), sheetsSource: "typed" })} />
+                      {isSuggested(row) ? (
+                        <Badge variant="secondary" className="text-[10px]" data-testid={`badge-sheets-source-${i}`}>suggested</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] border-primary/50" data-testid={`badge-sheets-source-${i}`}>yours</Badge>
+                      )}
+                    </div>
+                    {!isSuggested(row) &&
+                      suggestion.bySize[row.sheetSize] > 0 &&
+                      !sheetRows.some((r) => isSuggested(r) && r.sheetSize === row.sheetSize) && (
+                        <button
+                          type="button"
+                          className="mt-1 text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+                          onClick={() => updateSheetRow(i, { sheetsNeeded: suggestion.bySize[row.sheetSize], sheetsSource: "suggested" })}
+                          data-testid={`button-use-suggestion-${i}`}
+                        >
+                          wall lengths suggest {suggestion.bySize[row.sheetSize]}: use that
+                        </button>
+                      )}
                   </td>
                   <td className="p-2">
-                    <Select value={row.sheetSize} onValueChange={(v) => updateSheetRow(i, { sheetSize: v as SheetSize })}>
+                    <Select value={row.sheetSize} onValueChange={(v) => updateSheetRow(i, { sheetSize: v as SheetSize, sheetsSource: "typed" })}>
                       <SelectTrigger className="h-8 w-[100px] text-xs font-mono" data-testid={`select-sheet-size-${i}`}>
                         <SelectValue />
                       </SelectTrigger>

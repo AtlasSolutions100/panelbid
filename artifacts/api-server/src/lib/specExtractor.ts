@@ -364,7 +364,8 @@ Rules:
   - When the notation indicates the material runs to the ceiling, to deck, or is "open to structure" (full height), store exactly "to ceiling" as material_height. Schedule rows where the wall panel covers the full wall also count as "to ceiling".
   - If the same room shows the material at different heights on different walls, use the tallest.
   - Only use null for material_height when the page truly shows no height information for that material tag.
-- ceiling_height is the room's ceiling height from the schedule column — keep it separate from material_height.
+  - WHERE THE HEIGHT COMES FROM, in the installer's own words: "The elevation pages or notes on finish pages should tell you the height for the FRP, if not assume FRP from floor to ceiling. Ceiling height can be found on the reflected ceiling plan." So read the panel height from the elevation drawings and from notes on finish pages (schedule comments, general finish notes, legend notes). If neither gives a height for the room, leave material_height null: do NOT copy the ceiling height into material_height, and do NOT write "to ceiling" unless the page itself says so. The app applies the floor-to-ceiling rule itself and marks that room "assumed to ceiling".
+- ceiling_height is the room's ceiling height — keep it separate from material_height. Take it from the schedule's Ceiling Height column; when the page shows a reflected ceiling plan, read the room's ceiling height from the ceiling tag in that room (e.g. "9'-0\\" A.F.F." or "CLG HT 10'-0\\""). Use null when the page does not show it.
 - material_category must be one of "frp", "stainless", "pvc", or null if the material type is unclear (a legend on the same page may make it clear).
 - Set fire_rating_present_anywhere to true only if any fire/flame class rating appears anywhere on the page.
 

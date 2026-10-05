@@ -25,4 +25,9 @@ export interface TakeoffRoomRow {
   /** @nullable */
   fireRating: string | null;
   moldingType: MoldingType | null;
+  /**
+     * The room's ceiling height. Used as the panel height, and marked "assumed to ceiling", when the room has no panel height
+     * @nullable
+     */
+  ceilingHeight?: string | null;
 }

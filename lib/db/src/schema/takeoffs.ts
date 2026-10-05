@@ -23,12 +23,21 @@ export interface TakeoffRoomRowJson {
   productCode: string | null;
   fireRating: string | null;
   moldingType: "aluminum" | "pvc" | null;
+  // Ceiling height, used (and marked "assumed to ceiling") when the room has
+  // no panel height. Absent on rows saved before update 1.
+  ceilingHeight?: string | null;
 }
 
 export interface TakeoffSheetRowJson {
   sheetsNeeded: number;
   sheetSize: "4x4" | "4x8" | "4x10" | "4x12";
+  // 0 = no price typed (shown as "not priced").
   pricePerSheet: number;
+  // "suggested": the count follows the wall lengths. "typed" or absent: the
+  // person's own count.
+  sheetsSource?: "suggested" | "typed";
+  // Typed molding count for this row's molding length; null/absent = not typed.
+  moldingCount?: number | null;
 }
 
 export const takeoffsTable = pgTable("takeoffs", {

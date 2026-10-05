@@ -6,9 +6,18 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { SheetSize } from './sheetSize';
+import type { SheetsSource } from './sheetsSource';
 
 export interface TakeoffSheetRow {
   sheetsNeeded: number;
   sheetSize: SheetSize;
+  /** 0 means no price has been typed (shown as "not priced") */
   pricePerSheet: number;
+  /** suggested: the count follows the wall lengths. typed (or absent): the person's own count, never changed for them */
+  sheetsSource?: SheetsSource;
+  /**
+     * Typed molding count for this row's molding length (the same number is kept on every row of that length). Null or absent means not typed
+     * @nullable
+     */
+  moldingCount?: number | null;
 }

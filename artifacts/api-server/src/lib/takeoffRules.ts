@@ -24,6 +24,12 @@ export interface RoomRow {
   productCode: string | null;
   fireRating: string | null;
   moldingType: MoldingType | null;
+  /**
+   * The room's ceiling height. Used as the panel height, and marked "assumed
+   * to ceiling", when the room has no panel height. Absent on rows saved
+   * before update 1.
+   */
+  ceilingHeight?: string | null;
 }
 
 /** One sheet line on the takeoff sheet (stored as JSON in takeoffs.sheet_rows). */
@@ -31,6 +37,14 @@ export interface SheetRow {
   sheetsNeeded: number;
   sheetSize: SheetSize;
   pricePerSheet: number;
+  /**
+   * "suggested": the count follows the wall lengths. "typed" or absent: the
+   * person's own count, which is never changed for them. (Rows saved before
+   * update 1 have no mark, so they are his.)
+   */
+  sheetsSource?: "suggested" | "typed";
+  /** Typed molding count for this row's molding length; null/absent = not typed. */
+  moldingCount?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,14 +68,366 @@ export function flatProfitApplies(totalSheets: number): boolean {
 // Wall lengths
 // ---------------------------------------------------------------------------
 
-/** Parse wall lengths typed like "8 + 8 + 8.5, 12" into numbers. */
-export function parseWallLengths(input: string): number[] {
-  return (input.match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
+// Lengths are added in sixteenths of an inch (whole numbers), so three walls
+// of 5'-4" come to exactly 16 ft and never to 16.000000000000004, which would
+// round up to one sheet too many.
+const UNITS_PER_INCH = 16;
+const UNITS_PER_FOOT = 12 * UNITS_PER_INCH;
+
+const NUM = "(\\d+(?:\\.\\d+)?)";
+const FRACTION = "(?:\\s+(\\d+)\\s*\\/\\s*(\\d+))?";
+const FEET_MARK = "(?:'|ft\\.?|feet|foot)";
+const INCH_MARK = "(?:\"|''|in\\.?|inch(?:es)?)";
+const FEET_AND_INCHES = new RegExp(
+  `^${NUM}\\s*${FEET_MARK}(?:\\s*-?\\s*${NUM}${FRACTION}\\s*${INCH_MARK}?)?$`,
+  "i",
+);
+const INCHES_ONLY = new RegExp(`^${NUM}${FRACTION}\\s*${INCH_MARK}$`, "i");
+const PLAIN_NUMBER = /^\d+(?:\.\d+)?$/;
+const PLAIN_NUMBERS = /^\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?)+$/;
+
+function straightQuotes(text: string): string {
+  return text.replace(/[‘’′]/g, "'").replace(/[“”″]/g, '"');
 }
 
-/** Total wall length in feet for one room. */
+function inchesFrom(
+  whole: string | undefined,
+  top: string | undefined,
+  bottom: string | undefined,
+): number | null {
+  let inches = whole ? Number(whole) : 0;
+  if (top !== undefined && bottom !== undefined) {
+    if (Number(bottom) === 0) return null;
+    inches += Number(top) / Number(bottom);
+  }
+  return inches;
+}
+
+/**
+ * One length, in sixteenths of an inch: 8, 8.5, 8', 8'-6", 8' 6", 8 ft 6 in,
+ * 8'-6 1/2", 96". A bare number is feet. Null when it is anything else.
+ */
+function readOneLength(raw: string): number | null {
+  const text = straightQuotes(raw).trim();
+  if (PLAIN_NUMBER.test(text)) return Math.round(Number(text) * UNITS_PER_FOOT);
+  const feetInches = FEET_AND_INCHES.exec(text);
+  if (feetInches) {
+    const inches = inchesFrom(feetInches[2], feetInches[3], feetInches[4]);
+    if (inches === null) return null;
+    return Math.round(Number(feetInches[1]) * UNITS_PER_FOOT + inches * UNITS_PER_INCH);
+  }
+  const inchesOnly = INCHES_ONLY.exec(text);
+  if (inchesOnly) {
+    const inches = inchesFrom(inchesOnly[1], inchesOnly[2], inchesOnly[3]);
+    if (inches === null) return null;
+    return Math.round(inches * UNITS_PER_INCH);
+  }
+  return null;
+}
+
+export interface LengthRead {
+  /** False when some part of the text could not be read. */
+  ok: boolean;
+  /** Total of the parts that could be read, in feet. */
+  feet: number;
+  /** The same total in sixteenths of an inch (a whole number). */
+  units: number;
+  /** Each wall that was read, in feet. */
+  parts: number[];
+  /** The parts that could not be read, as typed. */
+  unread: string[];
+}
+
+/**
+ * Wall lengths as typed: walls joined by "+", "," or ";". Each wall may be
+ * plain feet ("8.5") or feet and inches ("8'-6\""). The old box added every
+ * number it saw, so 8'-6" + 8'-6" came to 28 ft; it is 17 ft. Anything that
+ * cannot be read is reported, never guessed.
+ */
+export function readWallLengths(input: string): LengthRead {
+  const partsUnits: number[] = [];
+  const unread: string[] = [];
+  for (const piece of straightQuotes(input).split(/[+,;\n]/)) {
+    const term = piece.trim();
+    if (term === "") continue;
+    const one = readOneLength(term);
+    if (one !== null) {
+      partsUnits.push(one);
+    } else if (PLAIN_NUMBERS.test(term)) {
+      // "8 8 8.5": plain numbers separated by spaces, as the old box allowed.
+      for (const n of term.split(/\s+/)) {
+        partsUnits.push(Math.round(Number(n) * UNITS_PER_FOOT));
+      }
+    } else {
+      unread.push(term);
+    }
+  }
+  const units = partsUnits.reduce((a, b) => a + b, 0);
+  return {
+    ok: unread.length === 0,
+    feet: units / UNITS_PER_FOOT,
+    units,
+    parts: partsUnits.map((u) => u / UNITS_PER_FOOT),
+    unread,
+  };
+}
+
+/** The walls that could be read, each in feet. */
+export function parseWallLengths(input: string): number[] {
+  return readWallLengths(input).parts;
+}
+
+/** Total wall length in feet for one room (the parts that could be read). */
 export function linearFootage(input: string): number {
-  return parseWallLengths(input).reduce((a, b) => a + b, 0);
+  return readWallLengths(input).feet;
+}
+
+// ---------------------------------------------------------------------------
+// Panel height
+// ---------------------------------------------------------------------------
+
+export interface HeightRead {
+  /** The height in feet, or null. */
+  feet: number | null;
+  /** The text says the panel runs to the ceiling (no number of its own). */
+  toCeiling: boolean;
+  /** Something is typed but it is not a height we can read. */
+  unread: boolean;
+}
+
+const TO_CEILING =
+  /to (the )?(ceiling|clg\.?|deck|structure)|full[- ]?h(eigh)?t|floor to ceiling|open to structure/i;
+const HEIGHT_WORDS =
+  /(^|\s)(a\.?\s?f\.?\s?f\.?|high|height|ht\.?|wainscot|max\.?|typ\.?)(?=\s|$)/gi;
+
+/** Read one height as typed ("8'-0\"", "9", "48\"", "to ceiling"). */
+export function readHeight(input: string | null | undefined): HeightRead {
+  const text = straightQuotes(input ?? "").trim();
+  if (text === "") return { feet: null, toCeiling: false, unread: false };
+  if (TO_CEILING.test(text)) return { feet: null, toCeiling: true, unread: false };
+  const bare = text.replace(HEIGHT_WORDS, " ").trim();
+  const units = readOneLength(bare);
+  // A bare number over 20 ("48") is far more likely inches than feet: ask.
+  const looksLikeInches = PLAIN_NUMBER.test(bare) && Number(bare) > 20;
+  if (units === null || units <= 0 || looksLikeInches) {
+    return { feet: null, toCeiling: false, unread: true };
+  }
+  return { feet: units / UNITS_PER_FOOT, toCeiling: false, unread: false };
+}
+
+export interface PanelHeight {
+  feet: number | null;
+  /** typed: the room's own panel height. ceiling: its ceiling height. */
+  source: "typed" | "ceiling" | "none";
+  /** True when no panel height was given and floor to ceiling was assumed. */
+  assumed: boolean;
+  /** Shown on the row: "assumed to ceiling", or what to type. */
+  note: string;
+}
+
+/**
+ * The panel height of a room. The client's rule: "The elevation pages or
+ * notes on finish pages should tell you the height for the FRP, if not assume
+ * FRP from floor to ceiling." So a room with no panel height uses its ceiling
+ * height, and says "assumed to ceiling" on the row. A height that is typed
+ * but cannot be read is never replaced by a guess.
+ */
+export function resolvePanelHeight(
+  row: Pick<RoomRow, "materialHeight" | "ceilingHeight">,
+): PanelHeight {
+  const own = readHeight(row.materialHeight);
+  if (own.feet !== null) {
+    return { feet: own.feet, source: "typed", assumed: false, note: "" };
+  }
+  if (own.unread) {
+    return {
+      feet: null,
+      source: "none",
+      assumed: false,
+      note: `can't read the height "${(row.materialHeight ?? "").trim()}": type it like 8' or 8'-6"`,
+    };
+  }
+  const ceiling = readHeight(row.ceilingHeight);
+  if (ceiling.feet !== null) {
+    return own.toCeiling
+      ? { feet: ceiling.feet, source: "ceiling", assumed: false, note: "to ceiling" }
+      : { feet: ceiling.feet, source: "ceiling", assumed: true, note: "assumed to ceiling" };
+  }
+  return {
+    feet: null,
+    source: "none",
+    assumed: false,
+    note: own.toCeiling
+      ? "to ceiling, but no ceiling height: type the ceiling height"
+      : "no height: type the panel height, or the ceiling height",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Suggested sheets
+// ---------------------------------------------------------------------------
+
+/** Every sheet is 4 ft wide. */
+export const SHEET_WIDTH_FT = 4;
+
+/**
+ * The shortest of his sheet sizes that covers the panel height:
+ * 8 ft or less 4x8, above 8 up to 10 4x10, above 10 4x12.
+ */
+export function sheetSizeForHeight(heightFt: number): SheetSize {
+  if (heightFt <= 8) return "4x8";
+  if (heightFt <= 10) return "4x10";
+  return "4x12";
+}
+
+function plain(n: number): string {
+  return String(Number(n.toFixed(2)));
+}
+
+export interface RoomSuggestion {
+  wall: LengthRead;
+  height: PanelHeight;
+  /** Null when no count can be suggested (see problem). */
+  sheets: number | null;
+  /** Null when the room has no height. */
+  sheetSize: SheetSize | null;
+  /** The working, in words, e.g. "34 ft of wall ÷ 4 ft a sheet = 8.5, rounded up to 9 sheets of 4x10". */
+  arithmetic: string;
+  /** Why there is no suggestion, in words. Null when there is one. */
+  problem: string | null;
+}
+
+/**
+ * Suggested sheets for one room: wall length ÷ the 4 ft sheet width, rounded
+ * up. The walls are measured straight through doors and windows ("Yes we
+ * measure through windows and doors to get our waste"), so NO waste is added
+ * and NO opening is taken out.
+ */
+export function suggestRoom(row: RoomRow): RoomSuggestion {
+  const wall = readWallLengths(row.wallLengths);
+  const height = resolvePanelHeight(row);
+  const sheetSize = height.feet !== null ? sheetSizeForHeight(height.feet) : null;
+  let problem: string | null = null;
+  if (!wall.ok) problem = `can't read "${wall.unread[0]}" in the wall lengths`;
+  else if (wall.units <= 0) problem = "no wall length typed";
+  else if (sheetSize === null) problem = height.note;
+  if (problem !== null || sheetSize === null) {
+    return { wall, height, sheets: null, sheetSize, arithmetic: "", problem };
+  }
+  const sheetUnits = SHEET_WIDTH_FT * UNITS_PER_FOOT;
+  const sheets = Math.ceil(wall.units / sheetUnits);
+  const noun = sheets === 1 ? "sheet" : "sheets";
+  const start = `${plain(wall.feet)} ft of wall ÷ ${SHEET_WIDTH_FT} ft a sheet = `;
+  const arithmetic =
+    wall.units % sheetUnits === 0
+      ? `${start}${sheets} ${noun} of ${sheetSize}`
+      : `${start}${plain(wall.feet / SHEET_WIDTH_FT)}, rounded up to ${sheets} ${noun} of ${sheetSize}`;
+  return { wall, height, sheets, sheetSize, arithmetic, problem: null };
+}
+
+export interface JobSuggestion {
+  rooms: RoomSuggestion[];
+  /** Suggested sheets per size (each room rounded up on its own, then added). */
+  bySize: Record<SheetSize, number>;
+}
+
+export function suggestSheets(roomRows: RoomRow[]): JobSuggestion {
+  const rooms = roomRows.map(suggestRoom);
+  const bySize: Record<SheetSize, number> = { "4x4": 0, "4x8": 0, "4x10": 0, "4x12": 0 };
+  for (const r of rooms) {
+    if (r.sheets !== null && r.sheetSize !== null) bySize[r.sheetSize] += r.sheets;
+  }
+  return { rooms, bySize };
+}
+
+export function isSuggested(row: SheetRow): boolean {
+  return row.sheetsSource === "suggested";
+}
+
+/**
+ * Bring every SUGGESTED sheet row up to date with the rooms. Rows the person
+ * typed are returned untouched. No row is added or removed. The server runs
+ * this on every save and before every proposal, so a stale suggested count is
+ * never stored or printed.
+ */
+export function refreshSuggestedRows(roomRows: RoomRow[], sheetRows: SheetRow[]): SheetRow[] {
+  const bySize = suggestSheets(roomRows).bySize;
+  const given = new Set<SheetSize>();
+  return sheetRows.map((row) => {
+    if (!isSuggested(row)) return row;
+    const count = given.has(row.sheetSize) ? 0 : bySize[row.sheetSize];
+    given.add(row.sheetSize);
+    return row.sheetsNeeded === count ? row : { ...row, sheetsNeeded: count };
+  });
+}
+
+/**
+ * The sheet rows after the rooms changed from prevRooms to nextRooms.
+ *
+ * - Suggested rows follow the wall lengths.
+ * - A size whose suggestion changed and that has no row at all gets a
+ *   suggested row.
+ * - A row the person typed is never changed, and no suggested row is added
+ *   beside it for the same size.
+ * - A suggested row the person deleted does not come back until the
+ *   suggestion for that size itself changes.
+ * - A suggested row with nothing typed in it goes away when its rooms do.
+ */
+export function applySuggestions(
+  prevRooms: RoomRow[],
+  nextRooms: RoomRow[],
+  sheetRows: SheetRow[],
+): SheetRow[] {
+  const before = suggestSheets(prevRooms).bySize;
+  const after = suggestSheets(nextRooms).bySize;
+  const rows = [...sheetRows];
+  for (const size of SHEET_SIZES) {
+    if (before[size] === after[size] || after[size] <= 0) continue;
+    if (!rows.some((r) => r.sheetSize === size)) {
+      rows.push({
+        sheetsNeeded: after[size],
+        sheetSize: size,
+        pricePerSheet: 0,
+        sheetsSource: "suggested",
+      });
+    }
+  }
+  return refreshSuggestedRows(nextRooms, rows).filter(
+    (r) =>
+      !(isSuggested(r) && r.sheetsNeeded === 0 && !(r.pricePerSheet > 0) && r.moldingCount == null),
+  );
+}
+
+/** What a room spec gives a new takeoff row. */
+export interface RoomSpecForDraft {
+  roomName: string | null;
+  roomNumber: string | null;
+  materialHeight: string | null;
+  ceilingHeight: string | null;
+  manufacturer: string | null;
+  color: string | null;
+  productCode: string | null;
+  fireRating: string | null;
+}
+
+/**
+ * The room rows of a new takeoff, from the confirmed room specs. The ceiling
+ * height is carried beside the panel height, never copied into it: a room
+ * with no panel height shows "assumed to ceiling" instead of a silent number.
+ */
+export function draftRoomRows(specs: RoomSpecForDraft[]): RoomRow[] {
+  return specs.map((s) => ({
+    roomName: s.roomName,
+    roomNumber: s.roomNumber,
+    wallLengths: "",
+    materialHeight: s.materialHeight,
+    ceilingHeight: s.ceilingHeight,
+    manufacturer: s.manufacturer,
+    color: s.color,
+    productCode: s.productCode,
+    fireRating: s.fireRating,
+    moldingType: null,
+  }));
 }
 
 // ---------------------------------------------------------------------------
