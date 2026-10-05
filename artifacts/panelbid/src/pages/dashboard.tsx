@@ -1,4 +1,4 @@
-import { useListJobs, useGetJobsSummary, getListJobsQueryKey, getGetJobsSummaryQueryKey, JobStatus } from "@workspace/api-client-react"
+import { useListJobs, useGetJobsSummary, useGetGmailStatus, getListJobsQueryKey, getGetJobsSummaryQueryKey, getGetGmailStatusQueryKey, JobStatus } from "@workspace/api-client-react"
 import { Layout } from "@/components/layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -41,6 +41,33 @@ function SummaryCards() {
   )
 }
 
+/**
+ * One line while Gmail is not bringing bids in: it needs a reconnect, or it
+ * was never connected. Nothing is shown while the answer is not known.
+ */
+function GmailLine() {
+  const { data: gmail } = useGetGmailStatus({
+    query: { queryKey: getGetGmailStatusQueryKey() }
+  })
+  if (!gmail) return null
+  if (gmail.connected && !gmail.needsReconnect) return null
+  return (
+    <div
+      role="status"
+      data-testid="gmail-line"
+      className="mb-6 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800"
+    >
+      <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+      <p>
+        {gmail.connected
+          ? "No new bid e-mails are coming in: Gmail needs to be reconnected. "
+          : "No new bid e-mails are coming in: Gmail is not connected. "}
+        <Link href="/settings" className="font-medium underline">Open Settings</Link>
+      </p>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const { data: jobs, isLoading } = useListJobs({
     query: { queryKey: getListJobsQueryKey() }
@@ -48,6 +75,7 @@ export default function Dashboard() {
 
   return (
     <Layout>
+      <GmailLine />
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Job Queue</h1>

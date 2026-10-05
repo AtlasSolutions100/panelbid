@@ -31,12 +31,20 @@ import {
   useDeleteContractorSource,
   getListContractorSourcesQueryKey,
 } from "@workspace/api-client-react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQueryClient, useQuery } from "@tanstack/react-query"
 import { useToast } from "@/hooks/use-toast"
 import { Plus, Trash2, CheckCircle2, Circle, Mail, RefreshCw, AlertCircle, CheckCircle, FileX, Inbox, Building2, Pencil, X, Check, Filter } from "lucide-react"
 
 // "example.com" (incl. subdomains) or "person@example.com"
 const CONTRACTOR_VALUE_RE = /^(?:[^\s@]+@)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i
+
+/** What GET /api/system/check answers: found or not and how, never where. */
+interface SystemCheck {
+  pdfinfo: { found: boolean; how: string }
+  pdftoppm: { found: boolean; how: string }
+  pathEntries: number
+  nixStore: { exists: boolean; hasPopplerFolder: boolean }
+}
 
 export default function Settings() {
   const { toast } = useToast()
@@ -71,6 +79,22 @@ export default function Settings() {
 
   const { data: gmailStatus, isLoading: gmailLoading } = useGetGmailStatus({
     query: { queryKey: getGetGmailStatusQueryKey(), refetchInterval: 60_000 }
+  })
+
+  // What this server needs to read plans (GET /api/system/check). Asked
+  // once, here only: not on every page.
+  const { data: systemCheck } = useQuery({
+    queryKey: ["system-check"],
+    queryFn: async (): Promise<SystemCheck> => {
+      const response = await fetch(`${import.meta.env.BASE_URL}api/system/check`)
+      if (!response.ok) throw new Error("system check refused")
+      return (await response.json()) as SystemCheck
+    },
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
 
   const { data: gmailActivity, isLoading: activityLoading } = useListGmailActivity({
@@ -472,6 +496,20 @@ export default function Settings() {
         <p className="text-muted-foreground mt-1">Configure application parameters and automated scanning rules.</p>
       </div>
 
+      {/* Server check: one line */}
+      {systemCheck && (
+        <div className="mb-8 space-y-2" data-testid="server-check">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Server check</h2>
+          {systemCheck.pdfinfo.found && systemCheck.pdftoppm.found ? (
+            <p className="text-sm" data-testid="server-check-line">PDF tools: ready</p>
+          ) : (
+            <p className="text-sm font-medium text-destructive" data-testid="server-check-line">
+              PDF tools: MISSING on this server: plans and price sheets can't be read yet.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Gmail Integration */}
       <div className="mb-8 space-y-4">
         <h2 className="text-xl font-semibold tracking-tight">Email Integration</h2>
@@ -483,10 +521,12 @@ export default function Settings() {
                 <Mail className="h-5 w-5 text-primary" />
                 <CardTitle className="text-lg">Gmail</CardTitle>
               </div>
-              {gmailStatus?.connected ? (
-                <Badge variant="default" className="bg-green-500/15 text-green-700 border-green-500/20">Connected</Badge>
+              {gmailStatus?.connected && gmailStatus.needsReconnect ? (
+                <Badge variant="default" data-testid="gmail-badge" className="bg-amber-500/15 text-amber-700 border-amber-500/30">Needs reconnect</Badge>
+              ) : gmailStatus?.connected ? (
+                <Badge variant="default" data-testid="gmail-badge" className="bg-green-500/15 text-green-700 border-green-500/20">Connected</Badge>
               ) : (
-                <Badge variant="secondary">Disconnected</Badge>
+                <Badge variant="secondary" data-testid="gmail-badge">Disconnected</Badge>
               )}
             </div>
             <CardDescription>
