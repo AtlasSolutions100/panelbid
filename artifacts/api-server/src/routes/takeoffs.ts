@@ -19,6 +19,7 @@ import {
   draftRoomRows,
   refreshSuggestedRows,
   roundToCents,
+  tidyMoldingCounts,
 } from "../lib/takeoffRules";
 
 const router: IRouter = Router();
@@ -113,7 +114,9 @@ router.put("/jobs/:jobId/takeoff", async (req, res): Promise<void> => {
   const jobId = params.data.jobId;
   // Suggested sheet rows are brought up to date with the rooms before they
   // are stored. Rows the person typed are stored exactly as sent.
-  const sheetRows = refreshSuggestedRows(body.data.roomRows, body.data.sheetRows);
+  const sheetRows = tidyMoldingCounts(
+    refreshSuggestedRows(body.data.roomRows, body.data.sheetRows),
+  );
   const [job] = await db
     .select({ id: jobsTable.id, status: jobsTable.status })
     .from(jobsTable)

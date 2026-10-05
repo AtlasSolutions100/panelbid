@@ -461,6 +461,100 @@ export function totalSheets(sheetRows: SheetRow[]): number {
 }
 
 // ---------------------------------------------------------------------------
+// Glue and moldings
+// ---------------------------------------------------------------------------
+
+/** The client's own words: "Glue is per sheet, one bucket does 12 sheets of any height." */
+export const GLUE_SHEETS_PER_BUCKET = 12;
+
+/** Buckets of glue: total sheets ÷ 12, rounded up. */
+export function glueBuckets(sheetCount: number): { buckets: number; arithmetic: string } {
+  if (!(sheetCount > 0)) return { buckets: 0, arithmetic: "no sheets, so no glue" };
+  const buckets = Math.ceil(sheetCount / GLUE_SHEETS_PER_BUCKET);
+  const noun = buckets === 1 ? "bucket" : "buckets";
+  const start = `${plain(sheetCount)} sheets ÷ ${GLUE_SHEETS_PER_BUCKET} a bucket = `;
+  const arithmetic =
+    sheetCount % GLUE_SHEETS_PER_BUCKET === 0
+      ? `${start}${buckets} ${noun}`
+      : `${start}${plain(sheetCount / GLUE_SHEETS_PER_BUCKET)}, rounded up to ${buckets} ${noun}`;
+  return { buckets, arithmetic };
+}
+
+/** Moldings come in two lengths. */
+export type MoldingLength = 8 | 10;
+export const MOLDING_LENGTHS: MoldingLength[] = [8, 10];
+
+/**
+ * The client's own words: "Moldings come in 8' and 10' lengths and the kind
+ * you use is dependent on the height of the sheet. 8' high or less for 8'
+ * molding, and above 8' is the 10' molding."
+ */
+export function moldingLengthForSheet(size: SheetSize): MoldingLength {
+  const sheetHeightFt = Number(size.split("x")[1]);
+  return sheetHeightFt <= 8 ? 8 : 10;
+}
+
+export interface MoldingLine {
+  lengthFt: MoldingLength;
+  /** Sheets that take this molding length. */
+  sheets: number;
+  /** The starting suggestion: one molding per sheet. AN ASSUMPTION, not his rule. */
+  suggested: number;
+  /** The count to use: what he typed, else the suggestion. */
+  count: number;
+  /** True when he typed the count himself. */
+  typed: boolean;
+}
+
+/**
+ * Moldings by length. The LENGTH is the client's rule. He has not said how
+ * many moldings a job takes, so no count rule is invented here: the count is
+ * whatever he types, and until he types one the page shows one per sheet,
+ * labelled as an assumption to confirm.
+ *
+ * A typed count is kept on the sheet rows of that length (the same number on
+ * each), so it is saved with the takeoff without any change to the database.
+ */
+export function moldingLines(sheetRows: SheetRow[]): MoldingLine[] {
+  return MOLDING_LENGTHS.map((lengthFt) => {
+    const mine = sheetRows.filter((r) => moldingLengthForSheet(r.sheetSize) === lengthFt);
+    const sheets = mine.reduce((sum, r) => sum + r.sheetsNeeded, 0);
+    const typedRow = mine.find((r) => r.moldingCount != null);
+    const typed = typedRow?.moldingCount ?? null;
+    return {
+      lengthFt,
+      sheets,
+      suggested: sheets,
+      count: typed !== null ? typed : sheets,
+      typed: typed !== null,
+    };
+  });
+}
+
+/** Type (or, with null, clear) the molding count for one length. */
+export function setMoldingCount(
+  sheetRows: SheetRow[],
+  lengthFt: MoldingLength,
+  count: number | null,
+): SheetRow[] {
+  return sheetRows.map((r) =>
+    moldingLengthForSheet(r.sheetSize) === lengthFt ? { ...r, moldingCount: count } : r,
+  );
+}
+
+/** Make every sheet row of a length carry that length's typed count. */
+export function tidyMoldingCounts(sheetRows: SheetRow[]): SheetRow[] {
+  const typed = new Map<MoldingLength, number | null>();
+  for (const line of moldingLines(sheetRows)) {
+    typed.set(line.lengthFt, line.typed ? line.count : null);
+  }
+  return sheetRows.map((r) => {
+    const want = typed.get(moldingLengthForSheet(r.sheetSize)) ?? null;
+    return (r.moldingCount ?? null) === want ? r : { ...r, moldingCount: want };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Cost lines and the total
 // ---------------------------------------------------------------------------
 

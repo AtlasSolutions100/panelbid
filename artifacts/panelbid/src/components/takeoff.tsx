@@ -52,8 +52,12 @@ import {
   applySuggestions,
   computeCosts,
   flatProfitApplies,
+  glueBuckets,
   isSuggested,
+  moldingLines,
   refreshSuggestedRows,
+  setMoldingCount,
+  tidyMoldingCounts,
   resolvePricePerSheet,
   sameJson,
   sheetAreaSqft,
@@ -348,12 +352,24 @@ export function TakeoffSection({
   // Rows the person typed are never touched (see applySuggestions).
   const changeRooms = (next: TakeoffRoomRow[]) => {
     setRoomRows(next)
-    setSheetRows((rows) => applySuggestions(roomRows, next, rows))
+    setSheetRows((rows) => tidyMoldingCounts(applySuggestions(roomRows, next, rows)))
   }
   const updateRoomRow = (i: number, patch: Partial<TakeoffRoomRow>) =>
     changeRooms(roomRows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
   const updateSheetRow = (i: number, patch: Partial<TakeoffSheetRow>) =>
-    setSheetRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
+    setSheetRows((rows) =>
+      tidyMoldingCounts(
+        rows.map((r, idx) => {
+          if (idx !== i) return r
+          // A row that moves to another sheet size takes that size's molding count.
+          const moved = patch.sheetSize !== undefined && patch.sheetSize !== r.sheetSize
+          return { ...r, ...patch, ...(moved ? { moldingCount: null } : {}) }
+        }),
+      ),
+    )
+
+  // Moldings by length (his rule) and glue buckets (his rule), with their working.
+  const moldings = useMemo(() => moldingLines(sheetRows), [sheetRows])
 
   const addRoomRow = () =>
     changeRooms([
@@ -362,7 +378,9 @@ export function TakeoffSection({
     ])
   // A row he adds himself is his from the start.
   const addSheetRow = () =>
-    setSheetRows((rows) => [...rows, { sheetsNeeded: 0, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "typed" }])
+    setSheetRows((rows) =>
+      tidyMoldingCounts([...rows, { sheetsNeeded: 0, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "typed" }]),
+    )
 
   const handleSave = () => {
     saveTakeoff.mutate(
@@ -837,6 +855,64 @@ export function TakeoffSection({
           <Button variant="ghost" size="sm" onClick={addSheetRow} className="text-xs font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground" data-testid="button-add-sheet-row">
             <Plus className="mr-2 h-4 w-4" /> Add Sheet Row
           </Button>
+        </div>
+
+        {/* Moldings and glue: quantities, worked out from the sheets */}
+        <div className="border-t border-border/40 p-4" data-testid="section-moldings-glue">
+          <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Moldings & Glue</h3>
+          <div className="mt-3 space-y-3 text-sm">
+            {moldings.map((line) => (
+              <div key={line.lengthFt} className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid={`row-molding-${line.lengthFt}`}>
+                <span className="w-56 text-muted-foreground">
+                  {line.lengthFt} ft molding
+                  <span className="block text-[10px]">
+                    {line.lengthFt === 8 ? "for sheets 8 ft high or less" : "for sheets above 8 ft"}
+                  </span>
+                </span>
+                <Input
+                  type="number"
+                  min={0}
+                  className="h-8 w-24 text-xs font-mono"
+                  value={line.count}
+                  disabled={line.sheets === 0 && !line.typed}
+                  onChange={(e) => setSheetRows((rows) => setMoldingCount(rows, line.lengthFt, num(e.target.value)))}
+                  data-testid={`input-molding-count-${line.lengthFt}`}
+                />
+                <span className="text-xs text-muted-foreground">pieces</span>
+                {line.sheets === 0 && !line.typed ? (
+                  <span className="text-xs text-muted-foreground">no sheets of this height</span>
+                ) : line.typed ? (
+                  <>
+                    <Badge variant="outline" className="text-[10px] border-primary/50" data-testid={`badge-molding-source-${line.lengthFt}`}>yours</Badge>
+                    <button
+                      type="button"
+                      className="text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+                      onClick={() => setSheetRows((rows) => setMoldingCount(rows, line.lengthFt, null))}
+                      data-testid={`button-molding-reset-${line.lengthFt}`}
+                    >
+                      back to one per sheet ({line.suggested})
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-xs font-medium text-amber-700" data-testid={`text-molding-assumed-${line.lengthFt}`}>
+                    assumed one per sheet: tell us your rule
+                  </span>
+                )}
+              </div>
+            ))}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="row-glue">
+              <span className="w-56 text-muted-foreground">
+                Glue
+                <span className="block text-[10px]">one bucket does 12 sheets of any height</span>
+              </span>
+              <span className="font-mono font-medium" data-testid="text-glue-buckets">
+                {glueBuckets(totals.totalSheets).buckets} bucket{glueBuckets(totals.totalSheets).buckets === 1 ? "" : "s"}
+              </span>
+              <span className="text-xs text-muted-foreground" data-testid="text-glue-arithmetic">
+                {glueBuckets(totals.totalSheets).arithmetic}
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Cost breakdown */}
