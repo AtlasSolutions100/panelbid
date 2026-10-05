@@ -1,11 +1,13 @@
-import { Router, type IRouter } from "express";
-import { createHash } from "node:crypto";
-import { mkdir, writeFile, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import path from "node:path";
+import {
+  Router,
+  type IRouter,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import multer from "multer";
 import { desc, eq } from "drizzle-orm";
-import { db, jobsTable, jobFilesTable } from "@workspace/db";
+import { db, jobsTable, jobFilesTable, type JobFile } from "@workspace/db";
 import {
   ListJobFilesParams,
   ListJobFilesResponse,
@@ -15,6 +17,15 @@ import {
   DeleteJobFileParams,
 } from "@workspace/api-zod";
 import { scanFiles } from "../lib/planScanner";
+import {
+  MAX_PLAN_FILE_BYTES,
+  PLAN_TOO_BIG_MESSAGE,
+  isPlanFileError,
+  planFileErrorBody,
+  planFilePath,
+  removeDiskCopy,
+  storePlanFile,
+} from "../lib/planFileStore";
 
 const router: IRouter = Router();
 
@@ -22,16 +33,48 @@ function serializeFile<T extends { uploadedAt: Date }>(file: T) {
   return { ...file, uploadedAt: file.uploadedAt.toISOString() };
 }
 
-// Local file storage. Kept behind this module so a future storage service
-// (e.g. object storage) can replace it without touching the API contract.
-const UPLOAD_DIR = path.resolve(
-  process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads"),
-);
+// Where a plan's bytes live (the database, with a working copy on the disk)
+// is lib/planFileStore.ts. This file never opens `filePath` itself.
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  limits: { fileSize: MAX_PLAN_FILE_BYTES }, // 50 MB
 });
+
+export const NOT_A_PDF_MESSAGE = "That file is not a PDF. Plans must be PDF files.";
+export const UPLOAD_BROKEN_MESSAGE =
+  "The file did not arrive whole. Check your connection and upload it again.";
+export const NO_FILE_MESSAGE = "No file arrived. Choose a PDF and upload it again.";
+
+/** multer, with its refusals turned into a status and a sentence. */
+function receiveOneFile(req: Request, res: Response, next: NextFunction): void {
+  upload.single("file")(req, res, (err: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        res.status(413).json({ code: "plan_too_big", message: PLAN_TOO_BIG_MESSAGE });
+        return;
+      }
+      req.log.warn({ multerCode: err.code }, "Upload refused");
+      res.status(400).json({ code: "upload_broken", message: UPLOAD_BROKEN_MESSAGE });
+      return;
+    }
+    next(err);
+  });
+}
+
+/**
+ * Answer with the status and the sentence of a plan-file error (gone: 410).
+ * False when the error is something else: the caller passes it on.
+ */
+function answeredPlanFileError(res: Response, err: unknown): boolean {
+  if (!isPlanFileError(err)) return false;
+  res.status(err.status).json(planFileErrorBody(err));
+  return true;
+}
 
 router.get("/jobs/:jobId/files", async (req, res): Promise<void> => {
   const params = ListJobFilesParams.safeParse(req.params);
@@ -40,6 +83,7 @@ router.get("/jobs/:jobId/files", async (req, res): Promise<void> => {
     return;
   }
 
+  // The rows only: a list never reads the files' bytes.
   const files = await db
     .select()
     .from(jobFilesTable)
@@ -50,7 +94,7 @@ router.get("/jobs/:jobId/files", async (req, res): Promise<void> => {
 
 router.post(
   "/jobs/:jobId/files",
-  upload.single("file"),
+  receiveOneFile,
   async (req, res): Promise<void> => {
     const params = UploadJobFileParams.safeParse(req.params);
     if (!params.success) {
@@ -69,7 +113,7 @@ router.post(
 
     const file = req.file;
     if (!file) {
-      res.status(400).json({ message: "No file provided (field 'file')" });
+      res.status(400).json({ code: "no_file", message: NO_FILE_MESSAGE });
       return;
     }
 
@@ -77,50 +121,43 @@ router.post(
       file.mimetype === "application/pdf" ||
       file.originalname.toLowerCase().endsWith(".pdf");
     if (!isPdf) {
-      res.status(400).json({ message: "Only PDF files are accepted" });
+      res.status(415).json({ code: "not_a_pdf", message: NOT_A_PDF_MESSAGE });
       return;
     }
 
-    const fileHash = createHash("sha256").update(file.buffer).digest("hex");
-
-    const jobDir = path.join(UPLOAD_DIR, String(job.id));
-    await mkdir(jobDir, { recursive: true });
-    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const storedName = `${Date.now()}_${safeName}`;
-    const filePath = path.join(jobDir, storedName);
-    await writeFile(filePath, file.buffer);
-
-    let created;
+    // The row and the bytes are stored together or not at all.
+    let created: JobFile;
     try {
-      [created] = await db
-        .insert(jobFilesTable)
-        .values({
-          jobId: job.id,
-          fileName: file.originalname,
-          filePath,
-          fileHash,
-          fileType: file.mimetype || "application/pdf",
-          fileSize: file.size,
-        })
-        .returning();
+      created = await storePlanFile({
+        jobId: job.id,
+        fileName: file.originalname,
+        fileType: file.mimetype || "application/pdf",
+        buffer: file.buffer,
+      });
     } catch (err) {
-      // Compensate: don't leave orphaned bytes on disk if the DB insert fails.
-      await unlink(filePath).catch(() => {});
+      if (isPlanFileError(err)) {
+        req.log.error(
+          { jobId: job.id, code: err.code, reason: "reason" in err ? err.reason : undefined },
+          "Upload could not be stored: nothing was added",
+        );
+        res.status(err.status).json(planFileErrorBody(err));
+        return;
+      }
       throw err;
     }
 
     req.log.info(
-      { jobId: job.id, fileId: created!.id, fileHash },
-      "File uploaded",
+      { jobId: job.id, fileId: created.id, fileHash: created.fileHash, bytes: created.fileSize },
+      "File uploaded: row and bytes stored in the database",
     );
-    res.status(201).json(UploadJobFileResponse.parse(serializeFile(created!)));
+    res.status(201).json(UploadJobFileResponse.parse(serializeFile(created)));
 
     // Kick off keyword scanning for the new file (fire-and-forget so the
     // upload response stays fast; results appear via the scans endpoint).
     const log = req.log;
-    scanFiles([created!])
-      .then((result) => log.info({ fileId: created!.id, ...result }, "Auto-scan complete"))
-      .catch((err) => log.error({ err, fileId: created!.id }, "Auto-scan failed"));
+    scanFiles([created])
+      .then((result) => log.info({ fileId: created.id, ...result }, "Auto-scan complete"))
+      .catch((err) => log.error({ err, fileId: created.id }, "Auto-scan failed"));
   },
 );
 
@@ -136,12 +173,20 @@ router.get("/files/:fileId/download", async (req, res): Promise<void> => {
     .from(jobFilesTable)
     .where(eq(jobFilesTable.id, params.data.fileId));
 
-  if (!file || !existsSync(file.filePath)) {
+  if (!file) {
     res.status(404).json({ message: "File not found" });
     return;
   }
 
-  res.download(file.filePath, file.fileName);
+  let onDisk: string;
+  try {
+    onDisk = await planFilePath(file);
+  } catch (err) {
+    if (answeredPlanFileError(res, err)) return;
+    throw err;
+  }
+
+  res.download(onDisk, file.fileName);
 });
 
 // Inline PDF view (opens in the browser so #page= anchors work).
@@ -157,9 +202,17 @@ router.get("/files/:fileId/view", async (req, res): Promise<void> => {
     .from(jobFilesTable)
     .where(eq(jobFilesTable.id, params.data.fileId));
 
-  if (!file || !existsSync(file.filePath)) {
+  if (!file) {
     res.status(404).json({ message: "File not found" });
     return;
+  }
+
+  let onDisk: string;
+  try {
+    onDisk = await planFilePath(file);
+  } catch (err) {
+    if (answeredPlanFileError(res, err)) return;
+    throw err;
   }
 
   res.setHeader("Content-Type", "application/pdf");
@@ -167,7 +220,7 @@ router.get("/files/:fileId/view", async (req, res): Promise<void> => {
     "Content-Disposition",
     `inline; filename="${encodeURIComponent(file.fileName)}"`,
   );
-  res.sendFile(file.filePath);
+  res.sendFile(onDisk);
 });
 
 router.delete("/files/:fileId", async (req, res): Promise<void> => {
@@ -177,6 +230,7 @@ router.delete("/files/:fileId", async (req, res): Promise<void> => {
     return;
   }
 
+  // Deleting the row deletes its bytes too (job_file_blobs cascades).
   const [deleted] = await db
     .delete(jobFilesTable)
     .where(eq(jobFilesTable.id, params.data.fileId))
@@ -187,11 +241,8 @@ router.delete("/files/:fileId", async (req, res): Promise<void> => {
     return;
   }
 
-  if (existsSync(deleted.filePath)) {
-    await unlink(deleted.filePath).catch((err) => {
-      req.log.warn({ err, filePath: deleted.filePath }, "Failed to unlink file");
-    });
-  }
+  // The working copy, when there is one.
+  await removeDiskCopy(deleted);
   res.sendStatus(204);
 });
 

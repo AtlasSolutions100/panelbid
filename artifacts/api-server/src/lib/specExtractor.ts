@@ -18,6 +18,7 @@ import {
 } from "@workspace/db";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "./logger";
+import { isPlanFileError, planFilePath } from "./planFileStore";
 
 const execFileAsync = promisify(execFile);
 
@@ -40,6 +41,8 @@ const ROOM_TOKEN_RE =
 
 export interface CandidatePage {
   file: JobFile;
+  /** Where the plan can be opened on the disk (from lib/planFileStore.ts). */
+  filePath: string;
   pageNumber: number;
   reason: string;
 }
@@ -48,6 +51,10 @@ export interface CandidateDetection {
   candidates: CandidatePage[];
   /** Files whose text extraction failed during detection. */
   failedFileIds: number[];
+  /** Plans left out because their file could not be had (gone: upload again). */
+  filesNotThere: number[];
+  /** The first plan-file error met, kept to throw when nothing could be read. */
+  fileProblem: unknown;
 }
 
 async function extractPdfPages(buffer: Buffer): Promise<string[]> {
@@ -87,11 +94,24 @@ export async function detectCandidatePages(
 
   const candidates: CandidatePage[] = [];
   const failedFileIds: number[] = [];
+  const filesNotThere: number[] = [];
+  let fileProblem: unknown = null;
   for (const file of files) {
+    // Every plan is looked for first, also one marked "needs OCR": a plan
+    // whose file is gone must be reported as gone, not passed over as a scan.
+    let onDisk: string;
+    try {
+      onDisk = await planFilePath(file);
+    } catch (err) {
+      if (!isPlanFileError(err)) throw err;
+      fileProblem ??= err;
+      filesNotThere.push(file.id);
+      continue;
+    }
     if (file.needsOcr) continue;
     let pages: string[];
     try {
-      pages = await extractPdfPages(await readFile(file.filePath));
+      pages = await extractPdfPages(await readFile(onDisk));
     } catch (err) {
       logger.warn({ err, fileId: file.id }, "Extraction failed during candidate detection");
       failedFileIds.push(file.id);
@@ -105,10 +125,16 @@ export async function detectCandidatePages(
       const roomTokens = pages[p]!.match(ROOM_TOKEN_RE)?.length ?? 0;
       const hasKeywordMatch = keywordPages.has(`${file.id}|${pageNumber}`);
       if (scheduleTerm) {
-        candidates.push({ file, pageNumber, reason: `contains "${scheduleTerm}"` });
+        candidates.push({
+          file,
+          filePath: onDisk,
+          pageNumber,
+          reason: `contains "${scheduleTerm}"`,
+        });
       } else if (hasKeywordMatch && roomTokens >= 8) {
         candidates.push({
           file,
+          filePath: onDisk,
           pageNumber,
           reason: `dense room table (${roomTokens} room tokens) with keyword matches`,
         });
@@ -133,7 +159,7 @@ export async function detectCandidatePages(
     }
   });
 
-  return { candidates, failedFileIds };
+  return { candidates, failedFileIds, filesNotThere, fileProblem };
 }
 
 /** Run pdftoppm for one page and return the produced JPEG buffer. */
@@ -724,7 +750,14 @@ export async function extractSpecsForJob(
   jobId: number,
   files: JobFile[],
 ): Promise<SpecExtractionResult> {
-  const { candidates, failedFileIds } = await detectCandidatePages(jobId, files);
+  const { candidates, failedFileIds, fileProblem } = await detectCandidatePages(
+    jobId,
+    files,
+  );
+
+  // Nothing to read and a plan whose file cannot be had: that is the reason
+  // (gone is 410, "upload it again"), before anything else is said.
+  if (candidates.length === 0 && fileProblem) throw fileProblem;
 
   // If detection itself failed on some files and produced nothing trustworthy,
   // abort before touching existing data — this is a failed run, not "no specs".
@@ -766,7 +799,7 @@ export async function extractSpecsForJob(
   for (const candidate of candidates) {
     try {
       const images = await renderPageImages(
-        candidate.file.filePath,
+        candidate.filePath,
         candidate.pageNumber,
       );
       const payload = await extractFromPage(images);

@@ -20,6 +20,11 @@ import {
   startPriceExtraction,
   isPriceExtractionRunning,
 } from "../lib/priceSheetExtractor";
+import {
+  isPlanFileError,
+  planFileErrorBody,
+  planFilePath,
+} from "../lib/planFileStore";
 
 const router: IRouter = Router();
 
@@ -90,6 +95,19 @@ router.post("/files/:fileId/extract-prices", async (req, res): Promise<void> => 
   if (!file) {
     res.status(404).json({ message: "File not found" });
     return;
+  }
+
+  // The reading itself runs after this answer. A plan whose file cannot be
+  // had is refused here, in words (gone: 410), instead of failing unseen.
+  try {
+    await planFilePath(file);
+  } catch (err) {
+    if (isPlanFileError(err)) {
+      req.log.warn({ fileId: file.id, code: err.code }, "Price extraction refused: the plan file cannot be had");
+      res.status(err.status).json(planFileErrorBody(err));
+      return;
+    }
+    throw err;
   }
 
   const started = startPriceExtraction(file);

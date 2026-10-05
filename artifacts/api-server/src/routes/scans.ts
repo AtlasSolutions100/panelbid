@@ -8,6 +8,7 @@ import {
   RescanJobResponse,
 } from "@workspace/api-zod";
 import { scanFiles } from "../lib/planScanner";
+import { isPlanFileError, planFileErrorBody } from "../lib/planFileStore";
 
 const router: IRouter = Router();
 
@@ -64,7 +65,18 @@ router.post("/jobs/:jobId/scan", async (req, res): Promise<void> => {
     .from(jobFilesTable)
     .where(eq(jobFilesTable.jobId, job.id));
 
-  const result = await scanFiles(files);
+  let result;
+  try {
+    result = await scanFiles(files);
+  } catch (err) {
+    // Not one of the job's plans could be had: say why (gone is 410).
+    if (isPlanFileError(err)) {
+      req.log.warn({ jobId: job.id, code: err.code }, "Job rescan: no plan file could be had");
+      res.status(err.status).json(planFileErrorBody(err));
+      return;
+    }
+    throw err;
+  }
   req.log.info({ jobId: job.id, ...result }, "Job rescan complete");
   res.json(RescanJobResponse.parse(result));
 });

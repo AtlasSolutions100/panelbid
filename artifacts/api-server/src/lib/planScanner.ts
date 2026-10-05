@@ -9,6 +9,7 @@ import {
   type InsertPlanScan,
 } from "@workspace/db";
 import { logger } from "./logger";
+import { isPlanFileError, planFilePath } from "./planFileStore";
 
 const CONTEXT_RADIUS = 90;
 // Advisory lock namespace for plan-scan serialization (arbitrary app-unique int).
@@ -45,14 +46,25 @@ function findMatches(
 }
 
 export interface ScanRunResult {
+  /** Files whose pages were read this run (not the ones that could not be had). */
   filesScanned: number;
   matchCount: number;
   filesNeedingOcr: number;
+  /**
+   * Ids of the plans left out because their file could not be had (gone:
+   * upload again). Ids only: this result is written to the log as it is.
+   */
+  filesNotThere: number[];
 }
 
 /**
  * Scan the given files against all active keywords. Replaces any previous
  * scan results for those files. Sets needs_ocr on files with no extractable text.
+ *
+ * A plan whose file cannot be had (lib/planFileStore.ts) is left out and
+ * named in filesNotThere; the plans that are there are still scanned. When
+ * NOT ONE of the given files could be had, the plan-file error itself is
+ * thrown (gone is 410), so the person is told why nothing was scanned.
  */
 export async function scanFiles(files: JobFile[]): Promise<ScanRunResult> {
   const keywords = await db
@@ -62,12 +74,29 @@ export async function scanFiles(files: JobFile[]): Promise<ScanRunResult> {
 
   let matchCount = 0;
   let filesNeedingOcr = 0;
+  let filesScanned = 0;
+  // A plan whose file cannot be had (gone, or not put back) is NOT marked
+  // "needs OCR": that would say something about its pages, and nobody has
+  // seen them. Its earlier results are left alone.
+  let fileProblem: unknown = null;
+  const filesNotThere: number[] = [];
 
   for (const file of files) {
+    let onDisk: string;
+    try {
+      onDisk = await planFilePath(file);
+    } catch (err) {
+      if (!isPlanFileError(err)) throw err;
+      fileProblem ??= err;
+      filesNotThere.push(file.id);
+      continue;
+    }
+    filesScanned++;
+
     let pages: string[] = [];
     let extractionFailed = false;
     try {
-      const buffer = await readFile(file.filePath);
+      const buffer = await readFile(onDisk);
       pages = await extractPdfPages(buffer);
     } catch (err) {
       extractionFailed = true;
@@ -121,5 +150,7 @@ export async function scanFiles(files: JobFile[]): Promise<ScanRunResult> {
     });
   }
 
-  return { filesScanned: files.length, matchCount, filesNeedingOcr };
+  if (fileProblem && filesScanned === 0) throw fileProblem;
+
+  return { filesScanned, matchCount, filesNeedingOcr, filesNotThere };
 }

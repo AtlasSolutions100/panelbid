@@ -13,6 +13,7 @@ import {
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { renderPageImages } from "./specExtractor";
 import { logger } from "./logger";
+import { planFilePath } from "./planFileStore";
 
 const execFileAsync = promisify(execFile);
 
@@ -129,7 +130,9 @@ async function upsertStatus(
  * when at least one page succeeded.
  */
 async function runPriceExtraction(file: JobFile): Promise<void> {
-  const pageCount = await getPageCount(file.filePath);
+  // The one way to a plan's file: on the disk, or brought back first.
+  const onDisk = await planFilePath(file);
+  const pageCount = await getPageCount(onDisk);
   // Price sheets are catalogs; cap pages to keep a run bounded.
   const maxPages = Math.min(pageCount, 20);
 
@@ -139,7 +142,7 @@ async function runPriceExtraction(file: JobFile): Promise<void> {
 
   for (let page = 1; page <= maxPages; page++) {
     try {
-      const images = await renderPageImages(file.filePath, page);
+      const images = await renderPageImages(onDisk, page);
       const payload = await extractPricesFromPage(images);
       pagesProcessed++;
       for (const item of payload.items) {

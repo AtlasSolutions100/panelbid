@@ -28,6 +28,7 @@ import {
   parseSourcePages,
   SPEC_EXTRACT_LOCK_NS,
 } from "../lib/specExtractor";
+import { isPlanFileError, planFileErrorBody } from "../lib/planFileStore";
 
 const router: IRouter = Router();
 
@@ -102,6 +103,12 @@ router.post("/jobs/:jobId/extract-specs", async (req, res): Promise<void> => {
     req.log.info({ jobId: job.id, ...result }, "Spec extraction complete");
     res.json(ExtractSpecsResponse.parse(result));
   } catch (err) {
+    // A plan whose file cannot be had: its own status and sentence (gone: 410).
+    if (isPlanFileError(err)) {
+      req.log.warn({ jobId: job.id, code: err.code }, "Spec extraction: no plan file could be had");
+      res.status(err.status).json(planFileErrorBody(err));
+      return;
+    }
     req.log.error({ err, jobId: job.id }, "Spec extraction failed");
     res.status(500).json({
       message:

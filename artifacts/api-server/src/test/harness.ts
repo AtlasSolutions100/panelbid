@@ -58,14 +58,26 @@ export interface Running {
   close(): Promise<void>;
 }
 
+export interface StartOptions {
+  /**
+   * A throwaway PostgreSQL on this computer, for the few tests that need a
+   * real database (see test/realDatabase.ts). Left out: the closed port.
+   */
+  databaseUrl?: string;
+  /** Where the app keeps its working copies of plan files. */
+  uploadDir?: string;
+}
+
 /**
  * Start the app on a free local port.
  *
  * A raw http request is used on purpose (not fetch): it sends exactly the
  * headers the test names, nothing more, and never follows a redirect.
  */
-export async function startApp(): Promise<Running> {
+export async function startApp(options: StartOptions = {}): Promise<Running> {
   applyTestEnv();
+  if (options.databaseUrl) process.env.DATABASE_URL = options.databaseUrl;
+  if (options.uploadDir) process.env.UPLOAD_DIR = options.uploadDir;
   const { default: app } = await import("../app");
 
   const server = http.createServer(app);

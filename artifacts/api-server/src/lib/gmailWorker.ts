@@ -5,13 +5,11 @@
  * Runs on a fixed interval (GMAIL_POLL_INTERVAL_MS, default 10 min).
  * Safe to call concurrently — a lock flag prevents overlap.
  */
-import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { eq, desc } from "drizzle-orm";
-import { db, jobsTable, jobFilesTable, gmailConnectionsTable, processedEmailsTable } from "@workspace/db";
+import { db, jobsTable, gmailConnectionsTable, processedEmailsTable } from "@workspace/db";
 import { logger } from "./logger";
 import { scanFiles } from "./planScanner";
+import { storePlanFile, isPlanFileError } from "./planFileStore";
 import {
   gmailGetProfile,
   gmailListMessages,
@@ -30,10 +28,6 @@ import {
   pdfLooksLikePlan,
 } from "./emailFilter";
 import type { ContractorSource } from "@workspace/db";
-
-const UPLOAD_DIR = path.resolve(
-  process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads"),
-);
 
 const POLL_INTERVAL_MS = Number(
   process.env.GMAIL_POLL_INTERVAL_MS ?? 10 * 60 * 1000,
@@ -338,42 +332,30 @@ async function tryDownloadUrl(url: string): Promise<Buffer | null> {
   }
 }
 
-/** Save a PDF buffer to disk and create a job_file DB row, then trigger scan. */
+/**
+ * Keep a PDF with its job, then trigger the keyword scan. The row and the
+ * bytes go into the database in one transaction (lib/planFileStore.ts); the
+ * disk copy is only a working copy.
+ */
 async function attachPdfToJob(
   jobId: number,
   pdfBuffer: Buffer,
   fileName: string,
 ): Promise<void> {
-  const fileHash = createHash("sha256").update(pdfBuffer).digest("hex");
-  const jobDir = path.join(UPLOAD_DIR, String(jobId));
-  await mkdir(jobDir, { recursive: true });
+  const created = await storePlanFile({
+    jobId,
+    fileName,
+    fileType: "application/pdf",
+    buffer: pdfBuffer,
+  });
 
-  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const storedName = `${Date.now()}_${safeName}`;
-  const filePath = path.join(jobDir, storedName);
-  await writeFile(filePath, pdfBuffer);
-
-  const [created] = await db
-    .insert(jobFilesTable)
-    .values({
-      jobId,
-      fileName,
-      filePath,
-      fileHash,
-      fileType: "application/pdf",
-      fileSize: pdfBuffer.length,
-    })
-    .returning();
-
-  if (created) {
-    scanFiles([created])
-      .then((r) =>
-        logger.info({ jobId, fileId: created.id, ...r }, "Gmail auto-scan complete"),
-      )
-      .catch((err) =>
-        logger.error({ err, jobId, fileId: created.id }, "Gmail auto-scan failed"),
-      );
-  }
+  scanFiles([created])
+    .then((r) =>
+      logger.info({ jobId, fileId: created.id, ...r }, "Gmail auto-scan complete"),
+    )
+    .catch((err) =>
+      logger.error({ err, jobId, fileId: created.id }, "Gmail auto-scan failed"),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -641,7 +623,15 @@ async function processMessage(
       try {
         await attachPdfToJob(job.id, buf, name);
       } catch (err) {
-        logger.warn({ err, jobId: job.id }, "Failed to attach PDF to job");
+        // A plan-file error carries a short reason; it never holds the bytes.
+        if (isPlanFileError(err)) {
+          logger.warn(
+            { jobId: job.id, code: err.code, reason: "reason" in err ? err.reason : undefined },
+            "Failed to attach PDF to job: nothing was added for it",
+          );
+        } else {
+          logger.warn({ err, jobId: job.id }, "Failed to attach PDF to job");
+        }
       }
     }
 
