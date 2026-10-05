@@ -98,8 +98,10 @@ export function Privacy() {
             <strong>Gmail, only if the customer connects a mailbox:</strong> see the next section.
           </li>
           <li>
-            <strong>Technical records:</strong> times, counts, job numbers and error messages, so we can fix
-            problems. These records do not hold the text of e-mails.
+            <strong>Technical records:</strong> times, counts, job numbers, error messages, and the internet
+            (IP) address of each sign-in attempt, so we can fix problems and keep the site secure. These
+            records do not hold the full text of e-mails. If saving a message fails, the error record can hold
+            that message's sender, subject and address line.
           </li>
         </Bullets>
       </Section>
@@ -110,8 +112,9 @@ export function Privacy() {
           <strong>read-only</strong> access. It cannot send, change or delete mail.
         </p>
         <p>
-          <strong>What it reads:</strong> new messages in the inbox since its last check: who sent each one,
-          the subject, the date, the message text, and PDF attachments.
+          <strong>What it reads:</strong> when a mailbox is first connected, the inbox messages from the last
+          7 days; after that, new inbox messages since its last check, never more than 7 days back. For each
+          one it reads who sent it, the subject, the date, the message text, and PDF attachments.
         </p>
         <p>
           <strong>What it does with them:</strong> it looks for invitations to bid. It skips messages that
@@ -126,7 +129,8 @@ export function Privacy() {
           the connected mailbox. The keys Google gives us for the mailbox are stored encrypted.
         </p>
         <p>
-          <strong>What it does not keep:</strong> the text of the messages.
+          <strong>What it does not keep:</strong> the text of the messages, apart from the short address line
+          it found (up to about 100 characters).
         </p>
       </Section>
 
@@ -137,8 +141,12 @@ export function Privacy() {
         </Bullets>
         <p>
           We do not sell this information. We do not use it for advertising. We do not use it to train AI
-          models. Our own staff look at a customer's data only to support that customer, to keep the service
-          secure, or when the law requires it.
+          models.
+        </p>
+        <p>
+          Our staff do not read Gmail data unless the customer first agrees to it for specific messages (for
+          example, to fix a problem the customer reports), it is needed for security, or the law requires it.
+          We look at a customer's other data (plans, takeoffs, proposals) only to support that customer.
         </p>
       </Section>
 
@@ -176,7 +184,8 @@ export function Privacy() {
             <strong>Replit:</strong> hosts the app and its database.
           </li>
           <li>
-            <strong>Google:</strong> Gmail, when the customer connects a mailbox.
+            <strong>Google:</strong> Gmail, when the customer connects a mailbox. Google also serves the fonts
+            this site uses, so your browser contacts Google when a page loads.
           </li>
           <li>
             <strong>Anthropic, through Replit:</strong> reads plan and price-sheet pages when a person asks.
@@ -188,7 +197,7 @@ export function Privacy() {
       <Section heading="How it is protected">
         <Bullets>
           <li>The connection to the site is encrypted (HTTPS).</li>
-          <li>Nothing can be read without signing in.</li>
+          <li>No job, plan, price or e-mail record can be read without signing in.</li>
           <li>The keys for a connected mailbox are stored encrypted.</li>
         </Bullets>
       </Section>
@@ -200,6 +209,12 @@ export function Privacy() {
           <li>
             <strong>Disconnect Gmail</strong> (in Settings) removes the stored keys and asks Google to end
             the access. The customer can also end it from their Google Account, under third-party access.
+          </li>
+          <li>
+            Disconnecting does not delete what was already saved. The list of messages the app looked at
+            (sender, subject, date), the jobs and the plans stay until they are deleted. Jobs and plans can be
+            deleted in the app. The list of messages cannot be deleted in the app yet: write to us and we
+            will delete it.
           </li>
           <li>
             To have everything deleted, write to <Contact />.

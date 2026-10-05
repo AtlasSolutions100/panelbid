@@ -229,10 +229,16 @@ export function AuthGate({ children, onSignedOut }: AuthGateProps) {
 function Frame({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-      <div className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary mb-6">
+      <div className="flex items-center gap-2 font-bold text-xl tracking-tight text-primary mb-3">
         <Building2 className="h-6 w-6" />
         PanelBid
       </div>
+      {/* What the app is, for anyone who lands here without a sign-in
+          (Google asks that the home page says so). */}
+      <p className="max-w-sm text-center text-sm text-muted-foreground mb-6" data-testid="text-what-this-is">
+        PanelBid is a private bidding tool for a wall-panel contractor. It collects invitations to bid, reads
+        plans, and builds takeoffs and proposals. Sign-in is for the customer's staff.
+      </p>
       <div className="w-full max-w-sm">{children}</div>
       {/* Plain links (a full page load): the two public pages sit outside
           this gate, see App.tsx. */}
