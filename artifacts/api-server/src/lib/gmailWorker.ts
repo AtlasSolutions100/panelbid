@@ -10,6 +10,7 @@ import { db, jobsTable, gmailConnectionsTable, processedEmailsTable } from "@wor
 import { logger } from "./logger";
 import { scanFiles } from "./planScanner";
 import { storePlanFile, isPlanFileError } from "./planFileStore";
+import { lookBackStartSeconds } from "./gmailLookBack";
 import {
   gmailGetProfile,
   gmailListMessages,
@@ -387,17 +388,12 @@ export async function pollOnce(): Promise<void> {
 
     logger.info({ connectionId: connection.id }, "Starting Gmail poll");
 
-    // Build query: messages since last poll, or last 7 days as fallback.
+    // Build query: messages since the last poll, but never more than 7 days
+    // back (a unix timestamp in seconds). After weeks without a poll (the
+    // connection needed a reconnect) the gap is not swept in one go: see
+    // lib/gmailLookBack.ts. First run: 7 days, as before.
     let query = "in:inbox has:attachment filename:pdf";
-    if (connection.lastPolledAt) {
-      // Gmail query: after:<unix timestamp in seconds>
-      const afterTs = Math.floor(connection.lastPolledAt.getTime() / 1000);
-      query += ` after:${afterTs}`;
-    } else {
-      // First run: look back 7 days.
-      const sevenDaysAgo = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000);
-      query += ` after:${sevenDaysAgo}`;
-    }
+    query += ` after:${lookBackStartSeconds(connection.lastPolledAt, Date.now())}`;
 
     // Also scan for emails with PDF links in body (no attachment filter).
     const bodyQuery = query.replace("has:attachment filename:pdf", "");
