@@ -8,6 +8,7 @@ import {
   checkProposalForExport,
   noPriceRegenerateResult,
   noPriceRegenerateWarning,
+  priceDifferenceNotice,
   priceFromTakeoff,
   priceProblem,
   STANDARD_NOTES,
@@ -325,6 +326,32 @@ describe("new sheet counts never go out under a price set for other counts", () 
     for (const s of [words, noPriceRegenerateWarning(0, []), noPriceRegenerateResult(3799), noPriceRegenerateResult(0)]) {
       expect(s).not.toMatch(/stays|as you typed/i);
     }
+  });
+});
+
+describe("a notice when the takeoff's total and the proposal's price differ", () => {
+  it("says both figures in one line", () => {
+    // the checker's case: 8 sheets now get the $800 flat profit, the proposal still says the old price
+    expect(priceDifferenceNotice(2242.25, 3442.25)).toBe(
+      "The takeoff now adds up to $2,242.25. This proposal says $3,442.25.",
+    );
+    expect(priceDifferenceNotice(3799, 4100)).toBe("The takeoff now adds up to $3,799.00. This proposal says $4,100.00.");
+  });
+
+  it("says nothing when they agree to within half a cent", () => {
+    expect(priceDifferenceNotice(3799, 3799)).toBeNull();
+    expect(priceDifferenceNotice(3917.4375, 3917.44)).toBeNull();
+    expect(priceDifferenceNotice(3799, 3799.01)).not.toBeNull();
+    expect(priceDifferenceNotice(3799.01, 3799)).not.toBeNull();
+  });
+
+  it("says nothing when the takeoff gives no price", () => {
+    expect(priceDifferenceNotice(null, 3799)).toBeNull();
+    expect(priceDifferenceNotice(null, 0)).toBeNull();
+  });
+
+  it("never shows $0.00 as a price: a proposal with no price is said in words", () => {
+    expect(priceDifferenceNotice(3799, 0)).toBe("The takeoff now adds up to $3,799.00. This proposal has no price yet.");
   });
 });
 

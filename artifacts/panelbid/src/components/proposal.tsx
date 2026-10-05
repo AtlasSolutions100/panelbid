@@ -35,6 +35,8 @@ import {
   computeCosts,
   noPriceRegenerateResult,
   noPriceRegenerateWarning,
+  priceDifferenceNotice,
+  roundToCents,
   type ExportCheck,
 } from "@/lib/takeoff-rules"
 
@@ -196,6 +198,14 @@ export function ProposalSection({
     : { amount: null, words: "", problems: [] }
   const priceBoxEmpty = (fields?.priceAmount.trim() ?? "") === ""
   const priceUnclear = !!fields && !priceBoxEmpty && check.amount === null
+
+  // A notice, never a block: the saved takeoff is fully priced and its total
+  // is not the price this proposal says. On the card it is the stored price;
+  // in the window it is the price as typed now (nothing while it is unclear).
+  const takeoffPrice = takeoffCosts?.fullyPriced ? roundToCents(takeoffCosts.total) : null
+  const storedPriceNotice = proposal ? priceDifferenceNotice(takeoffPrice, proposal.priceAmount) : null
+  const typedPriceNotice =
+    fields && !priceUnclear ? priceDifferenceNotice(takeoffPrice, check.amount ?? 0) : null
   const exportProblems = [
     ...check.problems,
     ...(takeoffUnsaved
@@ -388,6 +398,12 @@ export function ProposalSection({
             The takeoff was saved after this proposal was made. Press Regenerate so the sheet count and the price match it. Your other text is kept.
           </p>
         )}
+        {storedPriceNotice && (
+          <p className="flex items-start gap-2 text-amber-700" data-testid="text-proposal-price-differs">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            {storedPriceNotice}
+          </p>
+        )}
         {isLoading ? (
           "Loading proposal..."
         ) : proposal ? (
@@ -496,6 +512,11 @@ export function ProposalSection({
                       </span>
                     )}
                   </p>
+                  {typedPriceNotice && (
+                    <p className="text-xs text-amber-700" data-testid="text-proposal-price-differs-typed">
+                      {typedPriceNotice}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">

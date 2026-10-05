@@ -317,6 +317,24 @@ export function noPriceRegenerateResult(previousPrice: number): string {
     : "The takeoff has no full price, so the price was not taken from it. Type the total in the Price box.";
 }
 
+/**
+ * A notice for the proposal, never a block: the saved takeoff is fully priced
+ * and its total is not the price the proposal says (he may have typed his
+ * own price on purpose, or the takeoff may have moved since). Null when
+ * there is nothing to say: the takeoff gives no price, or the two agree to
+ * within half a cent.
+ */
+export function priceDifferenceNotice(
+  takeoffPrice: number | null,
+  proposalPrice: number,
+): string | null {
+  if (takeoffPrice === null) return null;
+  if (Math.abs(takeoffPrice - proposalPrice) <= 0.005) return null;
+  return proposalPrice > 0
+    ? `The takeoff now adds up to ${dollars(takeoffPrice)}. This proposal says ${dollars(proposalPrice)}.`
+    : `The takeoff now adds up to ${dollars(takeoffPrice)}. This proposal has no price yet.`;
+}
+
 /** Why a price sent to the server cannot be stored, in words. Null = fine. */
 export function priceProblem(priceAmount: number): string | null {
   return Number.isFinite(priceAmount) && priceAmount >= 0
