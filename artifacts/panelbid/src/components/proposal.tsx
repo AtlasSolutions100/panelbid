@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   useGetProposal,
@@ -36,6 +36,7 @@ import {
   noPriceRegenerateResult,
   noPriceRegenerateWarning,
   priceDifferenceNotice,
+  proposalWindowAfterSave,
   roundToCents,
   type ExportCheck,
 } from "@/lib/takeoff-rules"
@@ -166,6 +167,9 @@ export function ProposalSection({
   const [confirmRegenerate, setConfirmRegenerate] = useState(false)
   const [fields, setFields] = useState<ProposalFields | null>(null)
   const [dirty, setDirty] = useState(false)
+  // What the window shows right now, readable when a save's answer arrives.
+  const fieldsRef = useRef(fields)
+  fieldsRef.current = fields
 
   useEffect(() => {
     if (proposal && !previewOpen) {
@@ -269,6 +273,7 @@ export function ProposalSection({
       })
       return
     }
+    const shownWhenSent = fields
     updateProposal.mutate(
       {
         jobId,
@@ -279,8 +284,22 @@ export function ProposalSection({
       {
         onSuccess: (p) => {
           queryClient.setQueryData(getGetProposalQueryKey(jobId), p)
-          setFields(toFields(p))
-          setDirty(false)
+          // The window takes the server's copy only if it still shows exactly
+          // what was sent. If something was typed while the save was on its
+          // way (a price, say), that typing stays and the button keeps
+          // reading "Save Edits", never "Saved" (the takeoff's rule).
+          const after = proposalWindowAfterSave(shownWhenSent, fieldsRef.current, toFields(p))
+          if (after.typedSince) {
+            toast({
+              title: "What you typed since is not saved yet",
+              description:
+                "The proposal was saved as it was when you pressed Save. What you typed after that is still on screen and is NOT saved: press Save Edits again.",
+              variant: "destructive",
+            })
+            return
+          }
+          setFields(after.fields)
+          setDirty(after.dirty)
           onSaved?.()
         },
         onError: (err) =>

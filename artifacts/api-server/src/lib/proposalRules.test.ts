@@ -1,6 +1,9 @@
 /**
  * Tests for what the proposal says. Pure: no database, no network.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   buildFrpSentence,
@@ -11,6 +14,7 @@ import {
   priceDifferenceNotice,
   priceFromTakeoff,
   priceProblem,
+  proposalWindowAfterSave,
   STANDARD_NOTES,
   type ProposalFieldValues,
   type ProposalTakeoff,
@@ -392,5 +396,62 @@ describe("before a proposal is exported", () => {
   it("refuses while the FRP line still has a blank marked ___", () => {
     const r = checkProposalForExport(fields({ frp: "FRP ___ thick class C" }));
     expect(r.problems.join(" ")).toMatch(/___/);
+  });
+});
+
+describe("the proposal window when the answer to Save Edits comes back", () => {
+  // What the window shows: the boxes as typed (the price is text).
+  type Shown = { exclusions: string; notes: string; priceAmount: string };
+  const shown = (over: Partial<Shown> = {}): Shown => ({
+    exclusions: "",
+    notes: "Standard notes.",
+    priceAmount: "4,100.00",
+    ...over,
+  });
+  // The server's copy of what was sent, as the window would show it.
+  const asStored = (sent: Shown): Shown => ({ ...sent, priceAmount: "4100.00" });
+
+  it("a price typed while the save was on its way stays, and the window does not say Saved", () => {
+    // the checker's run: exclusions typed, Save Edits pressed, a price typed while the answer was held 2 s
+    const whenSent = shown({ exclusions: "Demolition of existing wall finish." });
+    const now = { ...whenSent, priceAmount: "4,321.00" };
+    const after = proposalWindowAfterSave(whenSent, now, asStored(whenSent));
+    expect(after.fields.priceAmount).toBe("4,321.00"); // not put back to the saved 4100.00
+    expect(after.fields.exclusions).toBe("Demolition of existing wall finish.");
+    expect(after.dirty).toBe(true); // the button reads "Save Edits", not "Saved"
+    expect(after.typedSince).toBe(true);
+  });
+
+  it("nothing typed since Save Edits was pressed: the window takes the saved copy and says Saved", () => {
+    const whenSent = shown({ exclusions: "Demolition." });
+    const after = proposalWindowAfterSave(whenSent, { ...whenSent }, asStored(whenSent));
+    expect(after.fields).toEqual(asStored(whenSent));
+    expect(after.dirty).toBe(false);
+    expect(after.typedSince).toBe(false);
+  });
+
+  it("typed and then put back exactly as it was counts as nothing typed", () => {
+    const whenSent = shown();
+    const after = proposalWindowAfterSave(whenSent, shown(), asStored(whenSent));
+    expect(after.dirty).toBe(false);
+  });
+
+  it("any box counts, not only the price", () => {
+    const whenSent = shown();
+    const after = proposalWindowAfterSave(whenSent, shown({ notes: "Standard notes. Add: night work." }), asStored(whenSent));
+    expect(after.fields.notes).toBe("Standard notes. Add: night work.");
+    expect(after.dirty).toBe(true);
+  });
+
+  it("the window's Save Edits uses this rule (and no longer takes the saved copy whatever was typed)", () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(
+      path.join(here, "../../../panelbid/src/components/proposal.tsx"),
+      "utf8",
+    );
+    const save = source.slice(source.indexOf("const saveEdits"), source.indexOf("const handleExport"));
+    expect(save).toContain("proposalWindowAfterSave(shownWhenSent, fieldsRef.current, toFields(p))");
+    expect(save).not.toMatch(/setFields\(toFields\(p\)\)/);
+    expect(save).not.toMatch(/setDirty\(false\)/);
   });
 });

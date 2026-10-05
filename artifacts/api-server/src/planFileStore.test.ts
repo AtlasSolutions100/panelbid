@@ -74,7 +74,8 @@ vi.mock("node:child_process", async (importOriginal) => {
 const database = readTestDatabase();
 const haveDatabase = "url" in database;
 if (!haveDatabase) {
-  console.warn(`\nSKIPPED, NOT RUN: the plan file store tests. ${database.skip}\n`);
+  // Straight to the terminal: the test runner hides console lines from here.
+  process.stderr.write(`\nSKIPPED, NOT RUN: the plan file store tests. ${database.skip}\n\n`);
 }
 
 type Db = typeof import("@workspace/db");

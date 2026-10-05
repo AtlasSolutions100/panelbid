@@ -126,7 +126,8 @@ class APIConnectionTimeoutError extends APIConnectionError {}
 const database = readTestDatabase();
 const haveDatabase = "url" in database;
 if (!haveDatabase) {
-  console.warn(`\nSKIPPED, NOT RUN: the failure-sentence tests. ${database.skip}\n`);
+  // Straight to the terminal: the test runner hides console lines from here.
+  process.stderr.write(`\nSKIPPED, NOT RUN: the failure-sentence tests. ${database.skip}\n\n`);
 }
 
 describe.skipIf(!haveDatabase)("a failure says why, in one plain sentence", () => {

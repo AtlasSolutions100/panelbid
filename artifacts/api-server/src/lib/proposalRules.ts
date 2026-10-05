@@ -9,6 +9,7 @@ import {
   readTypedAmount,
   roomLabel,
   roundToCents,
+  screenMayTakeSavedCopy,
   type CostInput,
   type RoomRow,
   type SheetRow,
@@ -333,6 +334,26 @@ export function priceDifferenceNotice(
   return proposalPrice > 0
     ? `The takeoff now adds up to ${dollars(takeoffPrice)}. This proposal says ${dollars(proposalPrice)}.`
     : `The takeoff now adds up to ${dollars(takeoffPrice)}. This proposal has no price yet.`;
+}
+
+/**
+ * When the answer to "Save Edits" comes back: what the proposal window shows.
+ *
+ * The same rule as the takeoff's Save (screenMayTakeSavedCopy): the window
+ * takes the server's copy only when it still shows exactly what it showed
+ * when Save Edits was pressed. If something was typed since (a slow line, a
+ * cold start), the typing stays on screen and the window stays "not saved":
+ * a price typed while the save was on its way is never put back to the old
+ * one under the word "Saved".
+ */
+export function proposalWindowAfterSave<F>(
+  shownWhenSent: F,
+  shownNow: F,
+  saved: F,
+): { fields: F; dirty: boolean; typedSince: boolean } {
+  return screenMayTakeSavedCopy(shownWhenSent, shownNow)
+    ? { fields: saved, dirty: false, typedSince: false }
+    : { fields: shownNow, dirty: true, typedSince: true };
 }
 
 /** Why a price sent to the server cannot be stored, in words. Null = fine. */
