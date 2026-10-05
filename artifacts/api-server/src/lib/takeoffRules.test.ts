@@ -10,6 +10,8 @@ import {
   parseWallLengths,
   readTypedAmount,
   resolvePricePerSheet,
+  roundToCents,
+  sameJson,
   sheetAreaSqft,
   totalSheets,
   type CostInput,
@@ -114,11 +116,56 @@ describe("profit rule", () => {
   });
 });
 
-describe("money", () => {
-  it("reads a plain typed amount", () => {
-    expect(readTypedAmount("4100.50")).toBe(4100.5);
+describe("typed dollar amounts", () => {
+  it("reads a plain amount", () => {
+    expect(readTypedAmount("4100.50")).toEqual({ ok: true, amount: 4100.5 });
+    expect(readTypedAmount("4100")).toEqual({ ok: true, amount: 4100 });
+    expect(readTypedAmount(" 87.5 ")).toEqual({ ok: true, amount: 87.5 });
   });
 
+  it("reads commas as thousands separators (4,100.00 is four thousand one hundred)", () => {
+    expect(readTypedAmount("4,100.00")).toEqual({ ok: true, amount: 4100 });
+    expect(readTypedAmount("$4,100")).toEqual({ ok: true, amount: 4100 });
+    expect(readTypedAmount("$ 4,100.5")).toEqual({ ok: true, amount: 4100.5 });
+    expect(readTypedAmount("1,234,567.89")).toEqual({ ok: true, amount: 1234567.89 });
+  });
+
+  it("refuses anything unclear, and says why in words", () => {
+    for (const bad of ["4,10", "41,00.00", "4.100,00", "4 100", "4100.505", "1,2345", "abc", "-5", "4,100.00 dollars", "4100..5", "1e3"]) {
+      const r = readTypedAmount(bad);
+      expect(r.ok, bad).toBe(false);
+      if (!r.ok) expect(r.reason.length, bad).toBeGreaterThan(10);
+    }
+  });
+
+  it("an empty box is refused as empty, not read as zero", () => {
+    const r = readTypedAmount("   ");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.empty).toBe(true);
+  });
+
+  it("the figure and the words come from the same number", () => {
+    const r = readTypedAmount("4,100.00");
+    expect(r.ok && amountInWords(r.amount)).toBe("Four Thousand One Hundred Dollars");
+    expect(roundToCents(3632.75375)).toBe(3632.75);
+    expect(roundToCents(0.1 + 0.2)).toBe(0.3);
+  });
+});
+
+describe("unsaved changes", () => {
+  it("two takeoffs with the same numbers are the same, whatever the key order", () => {
+    const again = JSON.parse(JSON.stringify(base)) as CostInput;
+    expect(sameJson(base, again)).toBe(true);
+    expect(sameJson({ a: 1, b: [1, 2] }, { b: [1, 2], a: 1 })).toBe(true);
+  });
+
+  it("any changed figure makes them differ", () => {
+    expect(sameJson(base, { ...base, laborDays: 2 })).toBe(false);
+    expect(sameJson(base, { ...base, sheetRows: sheets(36) })).toBe(false);
+  });
+});
+
+describe("money", () => {
   it("writes an amount in words", () => {
     expect(amountInWords(24680.5)).toBe(
       "Twenty-Four Thousand Six Hundred Eighty Dollars and Fifty Cents",

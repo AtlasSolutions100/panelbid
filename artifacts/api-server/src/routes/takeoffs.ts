@@ -14,6 +14,7 @@ import {
   SaveTakeoffBody,
   SaveTakeoffResponse,
 } from "@workspace/api-zod";
+import { computeCosts, roundToCents } from "../lib/takeoffRules";
 
 const router: IRouter = Router();
 
@@ -135,7 +136,20 @@ router.put("/jobs/:jobId/takeoff", async (req, res): Promise<void> => {
     hotelNights: body.data.hotelNights,
     freight: body.data.freight,
     profitOverride: body.data.profitOverride ?? null,
-    totalPrice: body.data.totalPrice,
+    // The server works the total out itself from the shared rules; the figure
+    // the browser sends is not trusted.
+    totalPrice: roundToCents(
+      computeCosts({
+        sheetRows: body.data.sheetRows,
+        laborRate: body.data.laborRate,
+        laborDays: body.data.laborDays,
+        laborHoursPerDay: body.data.laborHoursPerDay,
+        travelMiles: body.data.travelMiles,
+        hotelNights: body.data.hotelNights,
+        freight: body.data.freight,
+        profitOverride: body.data.profitOverride ?? null,
+      }).total,
+    ),
     notes: body.data.notes ?? null,
     thickness: body.data.thickness ?? null,
     updatedAt: new Date(),

@@ -45,6 +45,9 @@ export default function JobDetail() {
   const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [viewingFile, setViewingFile] = useState<{ id: number; fileName: string } | null>(null)
+  // True while the takeoff on screen differs from the saved one. The proposal
+  // is only made from a saved takeoff, so it needs to know.
+  const [takeoffUnsaved, setTakeoffUnsaved] = useState(false)
 
   const { data: job, isLoading: isLoadingJob } = useGetJob(id, {
     query: { enabled: !!id, queryKey: getGetJobQueryKey(id) }
@@ -463,13 +466,13 @@ export default function JobDetail() {
 
         {(job.status === "takeoff" || job.status === "proposal_ready") && (
           <div className="md:col-span-3">
-            <TakeoffSection job={job} files={files ?? []} />
+            <TakeoffSection job={job} files={files ?? []} onUnsavedChange={setTakeoffUnsaved} />
           </div>
         )}
 
         {job.status === "proposal_ready" && (
           <div className="md:col-span-3">
-            <ProposalSection job={job} />
+            <ProposalSection job={job} takeoffUnsaved={takeoffUnsaved} />
           </div>
         )}
       </div>

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import {
   db,
   jobsTable,
@@ -17,16 +17,10 @@ import {
   GenerateProposalParams,
   GenerateProposalResponse,
 } from "@workspace/api-zod";
-import { buildProposalValues } from "../lib/proposalRules";
+import { buildProposalValues, sheetAllotment } from "../lib/proposalRules";
+import { amountInWords, roundToCents } from "../lib/takeoffRules";
 
 const router: IRouter = Router();
-
-function firstValue(values: (string | null | undefined)[]): string | null {
-  for (const v of values) {
-    if (v && v.trim().length > 0) return v.trim();
-  }
-  return null;
-}
 
 function serializeProposal(row: ProposalRow) {
   return {
@@ -94,25 +88,41 @@ router.post(
         .json({ message: "Save a takeoff before generating a proposal" });
       return;
     }
+    // A proposal must print a sheet count: refuse, in words, when there is none.
+    if (sheetAllotment(takeoff.sheetRows).total <= 0) {
+      res.status(409).json({
+        message:
+          "The saved takeoff has no sheets. Type the wall lengths or the sheet counts, save the takeoff, then make the proposal.",
+      });
+      return;
+    }
 
-    const specs = await db
-      .select({ texture: roomSpecsTable.texture })
+    // Texture is kept per room on the room specs (takeoff rows do not carry it).
+    const textures = await db
+      .select({
+        roomName: roomSpecsTable.roomName,
+        roomNumber: roomSpecsTable.roomNumber,
+        texture: roomSpecsTable.texture,
+      })
       .from(roomSpecsTable)
-      .where(eq(roomSpecsTable.jobId, jobId));
-    const texture = firstValue(specs.map((s) => s.texture));
+      .where(eq(roomSpecsTable.jobId, jobId))
+      .orderBy(asc(roomSpecsTable.id));
 
     const [existing] = await db
       .select()
       .from(proposalsTable)
       .where(eq(proposalsTable.jobId, jobId));
 
+    // Always made from the takeoff as it is saved NOW. On a regenerate, only
+    // the FRP line and the price are rewritten; everything else the person
+    // typed into the proposal is kept (see buildProposalValues).
     const now = new Date();
     const values = {
       jobId,
       ...buildProposalValues({
         job,
         takeoff,
-        texture,
+        textures,
         now,
         existing: existing ?? null,
       }),
@@ -143,9 +153,24 @@ router.patch("/jobs/:jobId/proposal", async (req, res): Promise<void> => {
     return;
   }
 
+  // The figure and the words always come from the same number: whenever a
+  // price is sent, the words are written from it here. Words sent by the
+  // browser are never stored on their own.
+  const { priceInWords: _ignoredWords, ...edits } = body.data;
+  const price =
+    edits.priceAmount === undefined
+      ? {}
+      : (() => {
+          const priceAmount = roundToCents(Math.max(0, edits.priceAmount));
+          return {
+            priceAmount,
+            priceInWords: priceAmount > 0 ? amountInWords(priceAmount) : "",
+          };
+        })();
+
   const [updated] = await db
     .update(proposalsTable)
-    .set({ ...body.data, updatedAt: new Date() })
+    .set({ ...edits, ...price, updatedAt: new Date() })
     .where(eq(proposalsTable.jobId, params.data.jobId))
     .returning();
   if (!updated) {

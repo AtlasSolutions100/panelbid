@@ -9,6 +9,7 @@ import {
   getGetJobsSummaryQueryKey,
   getListJobFilesQueryKey,
   type Takeoff,
+  type TakeoffInput,
   type TakeoffRoomRow,
   type TakeoffSheetRow,
   type Job,
@@ -52,8 +53,29 @@ import {
   flatProfitApplies,
   linearFootage,
   resolvePricePerSheet,
+  sameJson,
   sheetAreaSqft,
 } from "@/lib/takeoff-rules"
+
+/** Everything on the takeoff sheet that a person types (the total is worked out). */
+type TakeoffData = Omit<TakeoffInput, "totalPrice">
+
+function dataFromTakeoff(t: Takeoff): TakeoffData {
+  return {
+    roomRows: t.roomRows,
+    sheetRows: t.sheetRows,
+    priceSheetFileId: t.priceSheetFileId,
+    laborRate: t.laborRate,
+    laborDays: t.laborDays,
+    laborHoursPerDay: t.laborHoursPerDay,
+    travelMiles: t.travelMiles,
+    hotelNights: t.hotelNights,
+    freight: t.freight,
+    profitOverride: t.profitOverride,
+    notes: null,
+    thickness: t.thickness,
+  }
+}
 
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" })
@@ -146,7 +168,16 @@ function PricePicker({
   )
 }
 
-export function TakeoffSection({ job, files }: { job: Job; files: JobFile[] }) {
+export function TakeoffSection({
+  job,
+  files,
+  onUnsavedChange,
+}: {
+  job: Job
+  files: JobFile[]
+  /** Told whenever the sheet on screen stops (or starts) matching what is saved. */
+  onUnsavedChange?: (unsaved: boolean) => void
+}) {
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const jobId = job.id
@@ -172,6 +203,8 @@ export function TakeoffSection({ job, files }: { job: Job; files: JobFile[] }) {
   const [showPriceItems, setShowPriceItems] = useState(false)
   const priceSheetInputRef = useRef<HTMLInputElement>(null)
   const loadedFor = useRef<number | null>(null)
+  // The takeoff as it is saved on the server (null: never saved).
+  const [savedData, setSavedData] = useState<TakeoffData | null>(null)
 
   // Price-sheet extraction: status polling + extracted items for the picker.
   const extractPrices = useExtractPriceSheet()
@@ -234,23 +267,54 @@ export function TakeoffSection({ job, files }: { job: Job; files: JobFile[] }) {
     prevStatus.current = extractionStatus
   }, [extractionStatus, priceSheetFileId, queryClient, toast, priceExtraction])
 
+  // Put a takeoff from the server on screen and remember it as "what is saved".
+  const showTakeoff = (t: Takeoff) => {
+    setRoomRows(t.roomRows)
+    setSheetRows(t.sheetRows)
+    setPriceSheetFileId(t.priceSheetFileId)
+    setLaborRate(String(t.laborRate))
+    setLaborDays(String(t.laborDays))
+    setLaborHoursPerDay(String(t.laborHoursPerDay))
+    setTravelMiles(String(t.travelMiles))
+    setHotelNights(String(t.hotelNights))
+    setFreight(String(t.freight))
+    setThickness(t.thickness ?? "")
+    setProfitOverride(t.profitOverride === null ? null : String(t.profitOverride))
+    setSavedData(t.saved ? dataFromTakeoff(t) : null)
+  }
+
   useEffect(() => {
     if (!takeoff || loadedFor.current === jobId) return
     loadedFor.current = jobId
-    setRoomRows(takeoff.roomRows)
-    setSheetRows(takeoff.sheetRows)
-    setPriceSheetFileId(takeoff.priceSheetFileId)
-    setLaborRate(String(takeoff.laborRate))
-    setLaborDays(String(takeoff.laborDays))
-    setLaborHoursPerDay(String(takeoff.laborHoursPerDay))
-    setTravelMiles(String(takeoff.travelMiles))
-    setHotelNights(String(takeoff.hotelNights))
-    setFreight(String(takeoff.freight))
-    setThickness(takeoff.thickness ?? "")
-    setProfitOverride(
-      takeoff.profitOverride === null ? null : String(takeoff.profitOverride),
-    )
+    showTakeoff(takeoff)
   }, [takeoff, jobId])
+
+  // What would be saved if Save were pressed now.
+  const currentData: TakeoffData = useMemo(
+    () => ({
+      roomRows,
+      sheetRows,
+      priceSheetFileId,
+      laborRate: num(laborRate),
+      laborDays: num(laborDays),
+      laborHoursPerDay: num(laborHoursPerDay),
+      travelMiles: num(travelMiles),
+      hotelNights: num(hotelNights),
+      freight: num(freight),
+      profitOverride: profitOverride !== null ? num(profitOverride) : null,
+      notes: null,
+      thickness: thickness.trim() !== "" ? thickness.trim() : null,
+    }),
+    [roomRows, sheetRows, priceSheetFileId, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, profitOverride, thickness],
+  )
+
+  // The proposal is only ever made from a saved takeoff, so the page has to
+  // know when the screen and the saved copy differ.
+  const loaded = !!takeoff && loadedFor.current === jobId
+  const unsaved = loaded && (savedData === null || !sameJson(savedData, currentData))
+  useEffect(() => {
+    onUnsavedChange?.(unsaved)
+  }, [unsaved, onUnsavedChange])
 
   // Live calculations
   const totals = useMemo(
@@ -285,25 +349,13 @@ export function TakeoffSection({ job, files }: { job: Job; files: JobFile[] }) {
     saveTakeoff.mutate(
       {
         jobId,
-        data: {
-          roomRows,
-          sheetRows,
-          priceSheetFileId,
-          laborRate: num(laborRate),
-          laborDays: num(laborDays),
-          laborHoursPerDay: num(laborHoursPerDay),
-          travelMiles: num(travelMiles),
-          hotelNights: num(hotelNights),
-          freight: num(freight),
-          profitOverride: profitOverride !== null ? num(profitOverride) : null,
-          totalPrice: totals.total,
-          notes: null,
-          thickness: thickness.trim() !== "" ? thickness.trim() : null,
-        },
+        // The server works the total out again from the same rules.
+        data: { ...currentData, totalPrice: totals.total },
       },
       {
         onSuccess: (saved) => {
           queryClient.setQueryData(getGetTakeoffQueryKey(jobId), saved)
+          showTakeoff(saved)
           queryClient.invalidateQueries({ queryKey: getGetJobQueryKey(jobId) })
           queryClient.invalidateQueries({ queryKey: getListJobsQueryKey() })
           queryClient.invalidateQueries({ queryKey: getGetJobsSummaryQueryKey() })
@@ -367,16 +419,24 @@ export function TakeoffSection({ job, files }: { job: Job; files: JobFile[] }) {
             Room measurements, sheet pricing, and cost breakdown. Wall lengths are read manually from the plans.
           </CardDescription>
         </div>
-        <Button
-          onClick={handleSave}
-          disabled={saveTakeoff.isPending}
-          size="sm"
-          className="font-mono uppercase tracking-wider text-xs"
-          data-testid="button-save-takeoff"
-        >
-          <Save className="mr-2 h-4 w-4" />
-          {saveTakeoff.isPending ? "Saving..." : "Save Takeoff"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <span
+            className={`text-xs ${unsaved ? "text-amber-600 font-medium" : "text-muted-foreground"}`}
+            data-testid="text-takeoff-save-state"
+          >
+            {unsaved ? "Changes not saved" : "Saved"}
+          </span>
+          <Button
+            onClick={handleSave}
+            disabled={saveTakeoff.isPending}
+            size="sm"
+            className="font-mono uppercase tracking-wider text-xs"
+            data-testid="button-save-takeoff"
+          >
+            <Save className="mr-2 h-4 w-4" />
+            {saveTakeoff.isPending ? "Saving..." : "Save Takeoff"}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         {/* Room measurements */}

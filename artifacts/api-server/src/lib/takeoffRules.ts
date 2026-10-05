@@ -163,9 +163,69 @@ export function computeCosts(input: CostInput): Costs {
 // Money
 // ---------------------------------------------------------------------------
 
-/** Read a dollar amount typed into a box. NaN when it cannot be read. */
-export function readTypedAmount(text: string): number {
-  return parseFloat(text);
+export function roundToCents(amount: number): number {
+  return Math.round(amount * 100) / 100;
+}
+
+export type MoneyRead =
+  | { ok: true; amount: number }
+  | { ok: false; empty: boolean; reason: string };
+
+/**
+ * Read a dollar amount typed into a box, strictly.
+ *
+ * Accepted: digits, an optional leading "$", commas as thousands separators
+ * in the right places, and a point with one or two decimals:
+ * "4100", "4,100", "$4,100.00", "87.5".
+ * Anything else is refused with a reason in words; nothing is guessed. (The
+ * old page read "4,100.00" as 4 and printed $4.00 on a proposal.)
+ */
+export function readTypedAmount(text: string): MoneyRead {
+  const typed = text.trim();
+  if (typed === "") {
+    return { ok: false, empty: true, reason: "No amount is typed." };
+  }
+  const body = typed.replace(/^\$\s*/, "");
+  const withCommas = /^\d{1,3}(,\d{3})+(\.\d{1,2})?$/;
+  const plain = /^\d+(\.\d{1,2})?$/;
+  const centsOnly = /^\.\d{1,2}$/;
+  if (withCommas.test(body) || plain.test(body) || centsOnly.test(body)) {
+    const amount = Number(body.replace(/,/g, ""));
+    if (Number.isFinite(amount)) {
+      return { ok: true, amount: roundToCents(amount) };
+    }
+  }
+  return {
+    ok: false,
+    empty: false,
+    reason: `Can't read "${typed}" as a dollar amount. Type it like 4100 or 4,100.00.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Unsaved changes
+// ---------------------------------------------------------------------------
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    const source = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) {
+      if (source[key] !== undefined) out[key] = canonical(source[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * True when two values hold the same data (key order does not matter). The
+ * page uses it to tell whether the takeoff on screen is the one that was
+ * saved, so a proposal is never made from figures the screen does not show.
+ */
+export function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 }
 
 const ONES = [

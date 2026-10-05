@@ -4,7 +4,9 @@ import {
   useGetProposal,
   useGenerateProposal,
   useUpdateProposal,
+  useGetTakeoff,
   getGetProposalQueryKey,
+  getGetTakeoffQueryKey,
   type Proposal,
   type Job,
 } from "@workspace/api-client-react"
@@ -13,9 +15,22 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useToast } from "@/hooks/use-toast"
-import { FileSignature, RefreshCw, Save, Download } from "lucide-react"
+import { FileSignature, RefreshCw, Save, Download, AlertTriangle } from "lucide-react"
 import { formatDateTime } from "@/lib/format"
+// The price is read, and its words written, by the shared rules: one number
+// for both, and anything unclear is refused instead of guessed.
+import { checkProposalForExport, type ExportCheck } from "@/lib/takeoff-rules"
 
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" })
@@ -32,8 +47,8 @@ interface ProposalFields {
   addsDeducts: string
   exclusions: string
   notes: string
+  /** As typed. Read strictly by checkProposalForExport, never by parseFloat. */
   priceAmount: string
-  priceInWords: string
 }
 
 function toFields(p: Proposal): ProposalFields {
@@ -49,8 +64,8 @@ function toFields(p: Proposal): ProposalFields {
     addsDeducts: p.addsDeducts,
     exclusions: p.exclusions,
     notes: p.notes,
-    priceAmount: String(p.priceAmount),
-    priceInWords: p.priceInWords,
+    // A price of 0 means "no price yet": show an empty box, not $0.00.
+    priceAmount: p.priceAmount > 0 ? p.priceAmount.toFixed(2) : "",
   }
 }
 
@@ -59,10 +74,9 @@ const escapeHtml = (s: string) =>
 const multiline = (s: string) => escapeHtml(s).replace(/\n/g, "<br/>")
 
 // Standalone HTML that mirrors the RCP bid proposal template, printed to PDF
-// via the browser print dialog.
-function buildProposalHtml(f: ProposalFields): string {
-  const amount = parseFloat(f.priceAmount)
-  const amountStr = Number.isFinite(amount) ? money(amount) : f.priceAmount
+// via the browser print dialog. The figure and the words are passed in as one
+// checked number: this function never reads the typed text itself.
+function buildProposalHtml(f: ProposalFields, amount: number, words: string): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Bid Proposal — ${escapeHtml(f.projectName)}</title>
 <style>
@@ -97,7 +111,7 @@ function buildProposalHtml(f: ProposalFields): string {
   <div class="field"><span class="label">ADDS/DEDUCTS:</span> ${multiline(f.addsDeducts)}</div>
   <div class="field"><span class="label">EXCLUSIONS:</span> ${multiline(f.exclusions)}</div>
   <div class="field"><span class="label">NOTES:</span><br/>${multiline(f.notes)}</div>
-  <div class="price">River City Plastics, Inc., is pleased to provide you with a price of: <b>${escapeHtml(amountStr)}</b> (${escapeHtml(f.priceInWords)}) to provide and install the above listed items. This price and obligation are valid for 30 days from the date quoted above.</div>
+  <div class="price">River City Plastics, Inc., is pleased to provide you with a price of: <b>${escapeHtml(money(amount))}</b> (${escapeHtml(words)}) to provide and install the above listed items. This price and obligation are valid for 30 days from the date quoted above.</div>
   <div class="sig">
     <p>Thank you,</p>
     <p>Ryan Ledbetter, Estimator</p>
@@ -107,7 +121,14 @@ function buildProposalHtml(f: ProposalFields): string {
 </body></html>`
 }
 
-export function ProposalSection({ job }: { job: Job }) {
+export function ProposalSection({
+  job,
+  takeoffUnsaved,
+}: {
+  job: Job
+  /** True while the takeoff on screen has changes that are not saved. */
+  takeoffUnsaved: boolean
+}) {
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const jobId = job.id
@@ -119,10 +140,15 @@ export function ProposalSection({ job }: { job: Job }) {
       retry: false,
     },
   })
+  // Same cached copy the takeoff section uses: tells us when it was last saved.
+  const { data: takeoff } = useGetTakeoff(jobId, {
+    query: { enabled: !!jobId, queryKey: getGetTakeoffQueryKey(jobId) },
+  })
   const generateProposal = useGenerateProposal()
   const updateProposal = useUpdateProposal()
 
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false)
   const [fields, setFields] = useState<ProposalFields | null>(null)
   const [dirty, setDirty] = useState(false)
 
@@ -138,7 +164,30 @@ export function ProposalSection({ job }: { job: Job }) {
     setDirty(true)
   }
 
-  const handleGenerate = () => {
+  // The takeoff was saved again after this proposal was made: its sheet count
+  // and price may be old.
+  const takeoffNewer =
+    !!proposal &&
+    !!takeoff?.saved &&
+    !!takeoff.updatedAt &&
+    new Date(takeoff.updatedAt).getTime() > new Date(proposal.generatedAt).getTime()
+
+  // One strict reading of the price, used for the screen, the save and the PDF.
+  const check: ExportCheck = fields
+    ? checkProposalForExport({ frp: fields.frp, priceAmount: fields.priceAmount })
+    : { amount: null, words: "", problems: [] }
+  const priceBoxEmpty = (fields?.priceAmount.trim() ?? "") === ""
+  const priceUnclear = !!fields && !priceBoxEmpty && check.amount === null
+  const exportProblems = [
+    ...check.problems,
+    ...(takeoffUnsaved
+      ? ["The takeoff has changes that are not saved. Save the takeoff, then regenerate."]
+      : takeoffNewer
+        ? ["The takeoff was saved after this proposal was made. Close this window and press Regenerate so the sheet count and the price match the takeoff. Your other text is kept."]
+        : []),
+  ]
+
+  const runGenerate = () => {
     generateProposal.mutate(
       { jobId },
       {
@@ -149,12 +198,14 @@ export function ProposalSection({ job }: { job: Job }) {
           setPreviewOpen(true)
           toast({
             title: proposal ? "Proposal regenerated" : "Proposal generated",
-            description: "Pre-filled from the job and current takeoff.",
+            description: proposal
+              ? "The FRP line and the price were rewritten from the saved takeoff. Everything else you typed was kept."
+              : "Filled in from the job and the saved takeoff.",
           })
         },
         onError: (err) =>
           toast({
-            title: "Failed to generate proposal",
+            title: "The proposal was not made",
             description: err instanceof Error ? err.message : undefined,
             variant: "destructive",
           }),
@@ -162,20 +213,40 @@ export function ProposalSection({ job }: { job: Job }) {
     )
   }
 
+  const handleGenerate = () => {
+    if (takeoffUnsaved) {
+      toast({
+        title: "Save the takeoff first",
+        description: "The takeoff has changes that are not saved. A proposal is only made from the saved takeoff.",
+        variant: "destructive",
+      })
+      return
+    }
+    if (proposal) setConfirmRegenerate(true)
+    else runGenerate()
+  }
+
   const saveEdits = (onSaved?: () => void) => {
     if (!fields) return
-    const amount = parseFloat(fields.priceAmount)
+    if (priceUnclear) {
+      toast({
+        title: "The price was not saved",
+        description: check.problems[0],
+        variant: "destructive",
+      })
+      return
+    }
     updateProposal.mutate(
       {
         jobId,
-        data: {
-          ...fields,
-          priceAmount: Number.isFinite(amount) ? amount : 0,
-        },
+        // An empty price box is saved as "no price yet" (0). The words are
+        // written by the server from the same number.
+        data: { ...fields, priceAmount: check.amount ?? 0 },
       },
       {
         onSuccess: (p) => {
           queryClient.setQueryData(getGetProposalQueryKey(jobId), p)
+          setFields(toFields(p))
           setDirty(false)
           onSaved?.()
         },
@@ -187,13 +258,24 @@ export function ProposalSection({ job }: { job: Job }) {
 
   const handleExport = () => {
     if (!fields) return
+    if (exportProblems.length > 0 || check.amount === null) {
+      toast({
+        title: "Not exported",
+        description: exportProblems[0],
+        variant: "destructive",
+      })
+      return
+    }
+    const amount = check.amount
+    const words = check.words
+    const snapshot = fields
     const doExport = () => {
       const win = window.open("", "_blank")
       if (!win) {
         toast({ title: "Popup blocked", description: "Allow popups to export the PDF.", variant: "destructive" })
         return
       }
-      win.document.write(buildProposalHtml(fields))
+      win.document.write(buildProposalHtml(snapshot, amount, words))
       win.document.close()
       win.focus()
       setTimeout(() => win.print(), 250)
@@ -230,7 +312,7 @@ export function ProposalSection({ job }: { job: Job }) {
         <div>
           <CardTitle className="text-lg">Bid Proposal</CardTitle>
           <CardDescription className="mt-1">
-            Customer-ready proposal on the River City Plastics template, generated from the takeoff.
+            Customer-ready proposal on the River City Plastics template, made from the saved takeoff.
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
@@ -247,7 +329,7 @@ export function ProposalSection({ job }: { job: Job }) {
           )}
           <Button
             onClick={handleGenerate}
-            disabled={generateProposal.isPending}
+            disabled={generateProposal.isPending || takeoffUnsaved}
             size="sm"
             className="font-mono uppercase tracking-wider text-xs"
             data-testid="button-generate-proposal"
@@ -265,17 +347,62 @@ export function ProposalSection({ job }: { job: Job }) {
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="p-4 text-sm text-muted-foreground">
+      <CardContent className="p-4 text-sm text-muted-foreground space-y-2">
+        {takeoffUnsaved && (
+          <p className="flex items-start gap-2 text-amber-700" data-testid="text-proposal-takeoff-unsaved">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            The takeoff has changes that are not saved. Save the takeoff first: a proposal is only made from the saved takeoff.
+          </p>
+        )}
+        {!takeoffUnsaved && takeoffNewer && (
+          <p className="flex items-start gap-2 text-amber-700" data-testid="text-proposal-takeoff-newer">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            The takeoff was saved after this proposal was made. Press Regenerate so the sheet count and the price match it. Your other text is kept.
+          </p>
+        )}
         {isLoading ? (
           "Loading proposal..."
         ) : proposal ? (
           <span data-testid="text-proposal-status">
-            Generated {formatDateTime(proposal.generatedAt)} — last edited {formatDateTime(proposal.updatedAt)} — price {money(proposal.priceAmount)}
+            Generated {formatDateTime(proposal.generatedAt)} — last edited {formatDateTime(proposal.updatedAt)} — price{" "}
+            {proposal.priceAmount > 0 ? money(proposal.priceAmount) : "not set yet"}
           </span>
         ) : (
           "No proposal yet. Generate one from the saved takeoff to review, edit, and export as PDF."
         )}
       </CardContent>
+
+      <AlertDialog open={confirmRegenerate} onOpenChange={setConfirmRegenerate}>
+        <AlertDialogContent data-testid="dialog-confirm-regenerate">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Regenerate from the saved takeoff?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p>
+                  Two things are rewritten from the takeoff: the <b>FRP line</b> and the <b>price</b>.
+                </p>
+                {proposal && (
+                  <div className="rounded-md border p-2 bg-muted/20 text-xs space-y-1">
+                    <p className="font-medium text-foreground">Replaced:</p>
+                    <p>{proposal.frp}</p>
+                    <p>Price: {proposal.priceAmount > 0 ? money(proposal.priceAmount) : "not set yet"}</p>
+                  </div>
+                )}
+                <p>
+                  Everything else you typed stays as it is: the date, the project lines, high impact panel, corner
+                  guards, stainless steel, adds/deducts, exclusions and notes.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-regenerate">Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={runGenerate} data-testid="button-confirm-regenerate">
+              Regenerate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -312,29 +439,68 @@ export function ProposalSection({ job }: { job: Job }) {
               {fieldRow("Exclusions", "exclusions", 2)}
               {fieldRow("Notes", "notes", 8)}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {fieldRow("Price ($)", "priceAmount")}
-                {fieldRow("Price in Words", "priceInWords")}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Price ($)</label>
+                  <Input
+                    value={fields.priceAmount}
+                    onChange={(e) => set({ priceAmount: e.target.value })}
+                    placeholder="Type the total, e.g. 4,100.00"
+                    className={`h-8 text-sm ${priceUnclear ? "border-destructive" : ""}`}
+                    data-testid="input-proposal-priceAmount"
+                  />
+                  <p className="text-xs" data-testid="text-proposal-price-read">
+                    {check.amount !== null ? (
+                      <span className="text-muted-foreground">Read as {money(check.amount)}</span>
+                    ) : (
+                      <span className="text-destructive">
+                        {priceBoxEmpty ? "No price yet: type the total price." : check.problems[0]}
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    Price in Words (written from the price)
+                  </label>
+                  <p className="min-h-8 rounded-md border bg-muted/20 px-3 py-1.5 text-sm" data-testid="text-proposal-priceInWords">
+                    {check.words || "—"}
+                  </p>
+                </div>
               </div>
 
               <div className="rounded-md border p-3 bg-muted/20 text-xs text-muted-foreground leading-relaxed">
                 <p>
                   River City Plastics, Inc., is pleased to provide you with a price of:{" "}
-                  <b className="text-foreground">
-                    {Number.isFinite(parseFloat(fields.priceAmount)) ? money(parseFloat(fields.priceAmount)) : fields.priceAmount}
+                  <b className="text-foreground" data-testid="text-proposal-price-sentence">
+                    {check.amount !== null ? money(check.amount) : "(no price yet)"}
                   </b>{" "}
-                  ({fields.priceInWords}) to provide and install the above listed items. This price and obligation are valid for 30 days from the date quoted above.
+                  ({check.words || "—"}) to provide and install the above listed items. This price and obligation are valid for 30 days from the date quoted above.
                 </p>
                 <p className="mt-2">Thank you, — Ryan Ledbetter, Estimator</p>
                 <p>Upon approval of this bid, please email this page to julie@rivercityplastics.com</p>
                 <p className="mt-1">Signed By: _______________ Date: _______________</p>
               </div>
 
+              {exportProblems.length > 0 && (
+                <div
+                  className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive space-y-1"
+                  data-testid="text-proposal-export-problems"
+                >
+                  <p className="font-medium">This proposal cannot be exported yet:</p>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {exportProblems.map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-1">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => saveEdits(() => toast({ title: "Proposal saved" }))}
-                  disabled={updateProposal.isPending || !dirty}
+                  disabled={updateProposal.isPending || !dirty || priceUnclear}
                   className="font-mono uppercase tracking-wider text-xs"
                   data-testid="button-save-proposal"
                 >
@@ -344,7 +510,7 @@ export function ProposalSection({ job }: { job: Job }) {
                 <Button
                   size="sm"
                   onClick={handleExport}
-                  disabled={updateProposal.isPending}
+                  disabled={updateProposal.isPending || exportProblems.length > 0}
                   className="font-mono uppercase tracking-wider text-xs"
                   data-testid="button-export-proposal"
                 >
