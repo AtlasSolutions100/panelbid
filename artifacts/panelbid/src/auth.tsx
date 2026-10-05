@@ -234,6 +234,16 @@ function Frame({ children }: { children: ReactNode }) {
         PanelBid
       </div>
       <div className="w-full max-w-sm">{children}</div>
+      {/* Plain links (a full page load): the two public pages sit outside
+          this gate, see App.tsx. */}
+      <div className="mt-6 flex items-center gap-4 text-xs text-muted-foreground">
+        <a href={`${import.meta.env.BASE_URL}privacy`} className="hover:text-foreground" data-testid="link-privacy">
+          Privacy
+        </a>
+        <a href={`${import.meta.env.BASE_URL}terms`} className="hover:text-foreground" data-testid="link-terms">
+          Terms
+        </a>
+      </div>
     </div>
   )
 }

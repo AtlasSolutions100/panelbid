@@ -5,6 +5,7 @@ import NotFound from '@/pages/not-found';
 import Dashboard from '@/pages/dashboard';
 import JobDetail from '@/pages/job-detail';
 import Settings from '@/pages/settings';
+import { Privacy, Terms } from '@/pages/legal';
 import { Route, Switch, Router as WouterRouter } from 'wouter';
 import { AuthGate } from '@/auth';
 
@@ -28,13 +29,22 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        {/* Nothing of the app is drawn, and no data is asked for, until the
-            server says this browser is signed in. */}
-        <AuthGate onSignedOut={dropLoadedData}>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-            <Router />
-          </WouterRouter>
-        </AuthGate>
+        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+          <Switch>
+            {/* The two public pages. They are outside the sign-in gate on
+                purpose (Google and anyone else must be able to read them),
+                and they ask the server for nothing. */}
+            <Route path="/privacy" component={Privacy} />
+            <Route path="/terms" component={Terms} />
+            <Route>
+              {/* Nothing of the app is drawn, and no data is asked for,
+                  until the server says this browser is signed in. */}
+              <AuthGate onSignedOut={dropLoadedData}>
+                <Router />
+              </AuthGate>
+            </Route>
+          </Switch>
+        </WouterRouter>
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>
