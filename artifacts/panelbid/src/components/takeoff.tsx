@@ -92,6 +92,46 @@ const num = (v: string) => {
   return Number.isFinite(n) ? n : 0
 }
 
+/** A number for an input box: 0 means "nothing typed", so the box is empty. */
+const box = (n: number) => (n === 0 ? "" : String(n))
+
+/** Shown wherever a price has not been typed. Never "$0.00". */
+const NOT_PRICED = "not priced"
+
+/**
+ * Price per sheet. An empty box means "not priced" (stored as 0). It keeps its
+ * own text so a price can be typed digit by digit without the box clearing.
+ */
+function PriceInput({
+  value,
+  onChange,
+  testId,
+}: {
+  value: number
+  onChange: (price: number) => void
+  testId: string
+}) {
+  const [text, setText] = useState(box(value))
+  useEffect(() => {
+    setText((t) => (num(t) === value ? t : box(value)))
+  }, [value])
+  return (
+    <Input
+      type="number"
+      min={0}
+      step="0.01"
+      className="h-8 text-xs w-28 font-mono"
+      value={text}
+      placeholder={NOT_PRICED}
+      data-testid={testId}
+      onChange={(e) => {
+        setText(e.target.value)
+        onChange(num(e.target.value))
+      }}
+    />
+  )
+}
+
 /**
  * Searchable selector of extracted price-sheet items. Picking one fills the
  * row's price per sheet (converting from price/sqft when needed); the value
@@ -198,12 +238,12 @@ export function TakeoffSection({
   const [roomRows, setRoomRows] = useState<TakeoffRoomRow[]>([])
   const [sheetRows, setSheetRows] = useState<TakeoffSheetRow[]>([])
   const [priceSheetFileId, setPriceSheetFileId] = useState<number | null>(null)
-  const [laborRate, setLaborRate] = useState("0")
-  const [laborDays, setLaborDays] = useState("0")
-  const [laborHoursPerDay, setLaborHoursPerDay] = useState("0")
-  const [travelMiles, setTravelMiles] = useState("0")
-  const [hotelNights, setHotelNights] = useState("0")
-  const [freight, setFreight] = useState("0")
+  const [laborRate, setLaborRate] = useState("")
+  const [laborDays, setLaborDays] = useState("")
+  const [laborHoursPerDay, setLaborHoursPerDay] = useState("")
+  const [travelMiles, setTravelMiles] = useState("")
+  const [hotelNights, setHotelNights] = useState("")
+  const [freight, setFreight] = useState("")
   const [thickness, setThickness] = useState("")
   const [profitOverride, setProfitOverride] = useState<string | null>(null)
   const [isUploadingPriceSheet, setIsUploadingPriceSheet] = useState(false)
@@ -285,12 +325,12 @@ export function TakeoffSection({
         : applySuggestions([], t.roomRows, t.sheetRows),
     )
     setPriceSheetFileId(t.priceSheetFileId)
-    setLaborRate(String(t.laborRate))
-    setLaborDays(String(t.laborDays))
-    setLaborHoursPerDay(String(t.laborHoursPerDay))
-    setTravelMiles(String(t.travelMiles))
-    setHotelNights(String(t.hotelNights))
-    setFreight(String(t.freight))
+    setLaborRate(box(t.laborRate))
+    setLaborDays(box(t.laborDays))
+    setLaborHoursPerDay(box(t.laborHoursPerDay))
+    setTravelMiles(box(t.travelMiles))
+    setHotelNights(box(t.hotelNights))
+    setFreight(box(t.freight))
     setThickness(t.thickness ?? "")
     setProfitOverride(t.profitOverride === null ? null : String(t.profitOverride))
     setSavedData(t.saved ? dataFromTakeoff(t) : null)
@@ -401,7 +441,9 @@ export function TakeoffSection({
             description:
               job.status === "takeoff"
                 ? "Job moved to Proposal Ready."
-                : `Total job price: ${money(totals.total)}`,
+                : totals.fullyPriced
+                  ? `Total job price: ${money(totals.total)}`
+                  : "Quantities saved. No job price yet: prices are optional.",
           })
         },
         onError: () => toast({ title: "Failed to save takeoff", variant: "destructive" }),
@@ -816,8 +858,11 @@ export function TakeoffSection({
                   </td>
                   <td className="p-2">
                     <div className="flex items-center gap-1">
-                      <Input type="number" min={0} step="0.01" className={`${inputCls} w-28 font-mono`} value={row.pricePerSheet} data-testid={`input-price-per-sheet-${i}`}
-                        onChange={(e) => updateSheetRow(i, { pricePerSheet: num(e.target.value) })} />
+                      <PriceInput
+                        value={row.pricePerSheet}
+                        testId={`input-price-per-sheet-${i}`}
+                        onChange={(price) => updateSheetRow(i, { pricePerSheet: price })}
+                      />
                       {priceItems.length > 0 && (
                         <PricePicker
                           items={priceItems}
@@ -829,7 +874,11 @@ export function TakeoffSection({
                     </div>
                   </td>
                   <td className="p-2 text-right font-mono text-xs" data-testid={`text-sheet-row-total-${i}`}>
-                    {money(row.sheetsNeeded * row.pricePerSheet)}
+                    {row.pricePerSheet > 0 ? (
+                      money(row.sheetsNeeded * row.pricePerSheet)
+                    ) : (
+                      <span className="text-muted-foreground font-sans">{NOT_PRICED}</span>
+                    )}
                   </td>
                   <td className="p-2 text-right">
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
@@ -844,7 +893,9 @@ export function TakeoffSection({
                 <tr className="bg-muted/10 font-medium">
                   <td className="p-3 text-xs font-mono" data-testid="text-total-sheets">{totals.totalSheets} sheets</td>
                   <td className="p-3" colSpan={2}></td>
-                  <td className="p-3 text-right font-mono text-xs" data-testid="text-materials-total">{money(totals.materials)}</td>
+                  <td className="p-3 text-right font-mono text-xs" data-testid="text-materials-total">
+                    {totals.materialsPriced ? money(totals.materials) : <span className="text-muted-foreground font-sans">{NOT_PRICED}</span>}
+                  </td>
                   <td></td>
                 </tr>
               )}
@@ -937,7 +988,9 @@ export function TakeoffSection({
                     <span>hrs/day</span>
                   </div>
                 </dt>
-                <dd className="font-mono font-medium" data-testid="text-labor-total">{money(totals.labor)}</dd>
+                <dd className="font-mono font-medium" data-testid="text-labor-total">
+                  {totals.laborPriced ? money(totals.labor) : <span className="text-muted-foreground font-sans font-normal">{NOT_PRICED}</span>}
+                </dd>
               </div>
               <div className="py-3 flex items-center justify-between gap-4">
                 <dt className="text-muted-foreground">
@@ -948,7 +1001,7 @@ export function TakeoffSection({
                       : `Hours over 10/day at $${OVERTIME_RATE}/hr — none`}
                   </p>
                 </dt>
-                <dd className="font-mono font-medium" data-testid="text-overtime-total">{money(totals.overtime)}</dd>
+                <dd className="font-mono font-medium" data-testid="text-overtime-total">{totals.overtime > 0 ? money(totals.overtime) : "—"}</dd>
               </div>
               <div className="py-3 flex items-center justify-between gap-4">
                 <dt className="text-muted-foreground">
@@ -958,7 +1011,7 @@ export function TakeoffSection({
                     <span>miles from Rocklin, CA × 8 × 1.5</span>
                   </div>
                 </dt>
-                <dd className="font-mono font-medium" data-testid="text-travel-total">{money(totals.travel)}</dd>
+                <dd className="font-mono font-medium" data-testid="text-travel-total">{totals.travel > 0 ? money(totals.travel) : "—"}</dd>
               </div>
             </dl>
             <dl className="divide-y divide-border/30 text-sm">
@@ -971,7 +1024,7 @@ export function TakeoffSection({
                     <span>nights</span>
                   </div>
                 </dt>
-                <dd className="font-mono font-medium" data-testid="text-hotel-total">{money(totals.hotel)}</dd>
+                <dd className="font-mono font-medium" data-testid="text-hotel-total">{totals.hotel > 0 ? money(totals.hotel) : "—"}</dd>
               </div>
               <div className="py-3 flex items-center justify-between gap-4">
                 <dt className="text-muted-foreground">
@@ -982,7 +1035,7 @@ export function TakeoffSection({
                     <span className="text-muted-foreground italic">pending company freight policy</span>
                   </div>
                 </dt>
-                <dd className="font-mono font-medium" data-testid="text-freight-total">{money(totals.freight)}</dd>
+                <dd className="font-mono font-medium" data-testid="text-freight-total">{totals.freight > 0 ? money(totals.freight) : "—"}</dd>
               </div>
               <div className="py-3 flex items-center justify-between gap-4">
                 <dt className="text-muted-foreground">
@@ -993,8 +1046,9 @@ export function TakeoffSection({
                       type="number"
                       min={0}
                       className="h-7 w-24 text-xs font-mono"
-                      value={profitOverride !== null ? profitOverride : totals.autoProfit}
-                      onChange={(e) => setProfitOverride(e.target.value)}
+                      value={profitOverride !== null ? profitOverride : box(totals.autoProfit)}
+                      placeholder="auto"
+                      onChange={(e) => setProfitOverride(e.target.value === "" ? null : e.target.value)}
                       data-testid="input-profit"
                     />
                     {profitOverride !== null ? (
@@ -1006,7 +1060,13 @@ export function TakeoffSection({
                     )}
                   </div>
                 </dt>
-                <dd className="font-mono font-medium" data-testid="text-profit-total">{money(totals.profit)}</dd>
+                <dd className="font-mono font-medium" data-testid="text-profit-total">
+                  {profitOverride !== null || totals.profit > 0 ? (
+                    money(totals.profit)
+                  ) : (
+                    <span className="text-muted-foreground font-sans font-normal">not set: type the labor days</span>
+                  )}
+                </dd>
               </div>
             </dl>
           </div>
@@ -1015,9 +1075,18 @@ export function TakeoffSection({
           <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4 flex items-center justify-between">
             <div>
               <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Total Job Price</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Materials {money(totals.materials)} + costs {money(totals.total - totals.materials)}</p>
+              {totals.fullyPriced ? (
+                <p className="text-xs text-muted-foreground mt-0.5">Materials {money(totals.materials)} + costs {money(totals.total - totals.materials)}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground mt-0.5" data-testid="text-total-not-priced-detail">
+                  No price yet for: {totals.notPriced.join(", ")}. Prices are optional: the sheets, moldings and glue above do not need them.
+                  {totals.total > 0 ? ` Priced so far: ${money(totals.total)}.` : ""}
+                </p>
+              )}
             </div>
-            <p className="text-3xl font-bold font-mono tracking-tight" data-testid="text-total-job-price">{money(totals.total)}</p>
+            <p className={`font-bold font-mono tracking-tight ${totals.fullyPriced ? "text-3xl" : "text-xl text-muted-foreground"}`} data-testid="text-total-job-price">
+              {totals.fullyPriced ? money(totals.total) : NOT_PRICED}
+            </p>
           </div>
         </div>
       </CardContent>

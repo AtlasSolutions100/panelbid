@@ -581,7 +581,18 @@ export interface Costs {
   freight: number;
   autoProfit: number;
   profit: number;
+  /** Every line added up. Only a job price when fullyPriced is true. */
   total: number;
+  /** Which rule gave the automatic profit. */
+  profitRule: "flat" | "per_day";
+  /** There are sheets, and every sheet row that has sheets has a price. */
+  materialsPriced: boolean;
+  /** A labor rate, days and hours a day are all typed. */
+  laborPriced: boolean;
+  /** Materials and labor are both priced: the total is a real job price. */
+  fullyPriced: boolean;
+  /** What has no price yet, in words. Empty when fully priced. */
+  notPriced: string[];
 }
 
 export function computeCosts(input: CostInput): Costs {
@@ -605,7 +616,29 @@ export function computeCosts(input: CostInput): Costs {
   const profit = input.profitOverride !== null ? input.profitOverride : autoProfit;
   // Same order of addition as the page always used, so totals match to the cent.
   const total = materials + labor + overtime + travel + hotel + freight + profit;
+
+  // Prices are optional ("this part can be unused ... allow us to input those
+  // prices manually"). A blank price is stored as 0 and means NOT PRICED: it
+  // is never shown as $0.00 and never passed on as part of a job price.
+  const unpricedSizes = [
+    ...new Set(
+      input.sheetRows
+        .filter((r) => r.sheetsNeeded > 0 && !(r.pricePerSheet > 0))
+        .map((r) => r.sheetSize),
+    ),
+  ];
+  const materialsPriced = sheets > 0 && unpricedSizes.length === 0;
+  const laborPriced = rate > 0 && days > 0 && hours > 0;
+  const notPriced: string[] = [];
+  if (!(sheets > 0)) notPriced.push("sheets (none yet)");
+  else if (unpricedSizes.length > 0) notPriced.push(`sheet prices (${unpricedSizes.join(", ")})`);
+  if (!laborPriced) notPriced.push("labor");
   return {
+    profitRule: flatProfitApplies(sheets) ? "flat" : "per_day",
+    materialsPriced,
+    laborPriced,
+    fullyPriced: materialsPriced && laborPriced,
+    notPriced,
     totalSheets: sheets,
     materials,
     labor,
@@ -618,6 +651,16 @@ export function computeCosts(input: CostInput): Costs {
     profit,
     total,
   };
+}
+
+/**
+ * The total stored with a saved takeoff: the job price to the cent when the
+ * takeoff is fully priced, else 0 ("no price"), so a part-total can never be
+ * mistaken for a price.
+ */
+export function savedTotalPrice(input: CostInput): number {
+  const costs = computeCosts(input);
+  return costs.fullyPriced ? roundToCents(costs.total) : 0;
 }
 
 // ---------------------------------------------------------------------------

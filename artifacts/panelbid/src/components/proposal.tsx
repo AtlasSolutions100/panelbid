@@ -30,7 +30,7 @@ import { FileSignature, RefreshCw, Save, Download, AlertTriangle } from "lucide-
 import { formatDateTime } from "@/lib/format"
 // The price is read, and its words written, by the shared rules: one number
 // for both, and anything unclear is refused instead of guessed.
-import { checkProposalForExport, type ExportCheck } from "@/lib/takeoff-rules"
+import { checkProposalForExport, computeCosts, type ExportCheck } from "@/lib/takeoff-rules"
 
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" })
@@ -172,6 +172,11 @@ export function ProposalSection({
     !!takeoff.updatedAt &&
     new Date(takeoff.updatedAt).getTime() > new Date(proposal.generatedAt).getTime()
 
+  // Prices are optional. A takeoff that is not fully priced gives the proposal
+  // no price: the person types the total here instead.
+  const takeoffCosts = takeoff?.saved ? computeCosts(takeoff) : null
+  const takeoffGivesPrice = takeoffCosts?.fullyPriced ?? false
+
   // One strict reading of the price, used for the screen, the save and the PDF.
   const check: ExportCheck = fields
     ? checkProposalForExport({ frp: fields.frp, priceAmount: fields.priceAmount })
@@ -198,9 +203,11 @@ export function ProposalSection({
           setPreviewOpen(true)
           toast({
             title: proposal ? "Proposal regenerated" : "Proposal generated",
-            description: proposal
-              ? "The FRP line and the price were rewritten from the saved takeoff. Everything else you typed was kept."
-              : "Filled in from the job and the saved takeoff.",
+            description: !takeoffGivesPrice
+              ? "The takeoff has no full price, so the price was not taken from it. Type the total in the Price box."
+              : proposal
+                ? "The FRP line and the price were rewritten from the saved takeoff. Everything else you typed was kept."
+                : "Filled in from the job and the saved takeoff.",
           })
         },
         onError: (err) =>
@@ -378,14 +385,23 @@ export function ProposalSection({
             <AlertDialogTitle>Regenerate from the saved takeoff?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3 text-sm text-muted-foreground">
-                <p>
-                  Two things are rewritten from the takeoff: the <b>FRP line</b> and the <b>price</b>.
-                </p>
+                {takeoffGivesPrice ? (
+                  <p>
+                    Two things are rewritten from the takeoff: the <b>FRP line</b> and the <b>price</b>.
+                  </p>
+                ) : (
+                  <p>
+                    The <b>FRP line</b> is rewritten from the takeoff. The <b>price stays as you typed it</b>: the
+                    takeoff has no price yet for {takeoffCosts?.notPriced.join(", ") ?? "its lines"}.
+                  </p>
+                )}
                 {proposal && (
                   <div className="rounded-md border p-2 bg-muted/20 text-xs space-y-1">
                     <p className="font-medium text-foreground">Replaced:</p>
                     <p>{proposal.frp}</p>
-                    <p>Price: {proposal.priceAmount > 0 ? money(proposal.priceAmount) : "not set yet"}</p>
+                    {takeoffGivesPrice && (
+                      <p>Price: {proposal.priceAmount > 0 ? money(proposal.priceAmount) : "not set yet"}</p>
+                    )}
                   </div>
                 )}
                 <p>

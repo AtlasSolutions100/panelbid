@@ -15,10 +15,9 @@ import {
   SaveTakeoffResponse,
 } from "@workspace/api-zod";
 import {
-  computeCosts,
   draftRoomRows,
   refreshSuggestedRows,
-  roundToCents,
+  savedTotalPrice,
   tidyMoldingCounts,
 } from "../lib/takeoffRules";
 
@@ -140,18 +139,17 @@ router.put("/jobs/:jobId/takeoff", async (req, res): Promise<void> => {
     profitOverride: body.data.profitOverride ?? null,
     // The server works the total out itself from the shared rules; the figure
     // the browser sends is not trusted.
-    totalPrice: roundToCents(
-      computeCosts({
-        sheetRows,
-        laborRate: body.data.laborRate,
-        laborDays: body.data.laborDays,
-        laborHoursPerDay: body.data.laborHoursPerDay,
-        travelMiles: body.data.travelMiles,
-        hotelNights: body.data.hotelNights,
-        freight: body.data.freight,
-        profitOverride: body.data.profitOverride ?? null,
-      }).total,
-    ),
+    // Stored as 0 ("no price") unless the takeoff is fully priced.
+    totalPrice: savedTotalPrice({
+      sheetRows,
+      laborRate: body.data.laborRate,
+      laborDays: body.data.laborDays,
+      laborHoursPerDay: body.data.laborHoursPerDay,
+      travelMiles: body.data.travelMiles,
+      hotelNights: body.data.hotelNights,
+      freight: body.data.freight,
+      profitOverride: body.data.profitOverride ?? null,
+    }),
     notes: body.data.notes ?? null,
     thickness: body.data.thickness ?? null,
     updatedAt: new Date(),

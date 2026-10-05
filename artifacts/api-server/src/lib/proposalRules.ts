@@ -233,12 +233,17 @@ export interface ProposalSource {
   existing: ProposalFieldValues | null;
 }
 
-/** The price a takeoff gives, to the cent, and its words (same number). */
+/**
+ * The price a takeoff gives, to the cent, and its words (same number). Null
+ * when the takeoff is not fully priced: a part-total is never a price.
+ */
 export function priceFromTakeoff(takeoff: ProposalTakeoff): {
   priceAmount: number;
   priceInWords: string;
-} {
-  const priceAmount = roundToCents(computeCosts(takeoff).total);
+} | null {
+  const costs = computeCosts(takeoff);
+  if (!costs.fullyPriced) return null;
+  const priceAmount = roundToCents(costs.total);
   return { priceAmount, priceInWords: amountInWords(priceAmount) };
 }
 
@@ -250,11 +255,22 @@ export function priceFromTakeoff(takeoff: ProposalTakeoff): {
  * Everything else is written once, the first time. On a regenerate, whatever
  * is already in the proposal stays exactly as the person left it: date,
  * project lines, the other product lines, adds/deducts, exclusions, notes.
+ *
+ * Prices are optional. When the takeoff is not fully priced it gives no
+ * price: a new proposal starts with none (the person types the total), and a
+ * regenerate keeps the total the person typed.
  */
 export function buildProposalValues(src: ProposalSource): ProposalFieldValues {
+  const typedPrice = src.existing
+    ? {
+        priceAmount: src.existing.priceAmount,
+        priceInWords:
+          src.existing.priceAmount > 0 ? amountInWords(src.existing.priceAmount) : "",
+      }
+    : { priceAmount: 0, priceInWords: "" };
   const fromTakeoff = {
     frp: buildFrpSentence(src.takeoff, src.textures),
-    ...priceFromTakeoff(src.takeoff),
+    ...(priceFromTakeoff(src.takeoff) ?? typedPrice),
   };
   if (src.existing) {
     return {
