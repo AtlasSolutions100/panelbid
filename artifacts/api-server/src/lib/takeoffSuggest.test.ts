@@ -51,6 +51,11 @@ describe("wall lengths in feet and inches", () => {
     expect(readWallLengths("").ok).toBe(true);
   });
 
+  it("reads a number that is still being typed (12. is 12)", () => {
+    expect(readWallLengths("12 + 12.")).toMatchObject({ ok: true, feet: 24 });
+    expect(readWallLengths("12 + ")).toMatchObject({ ok: true, feet: 12 });
+  });
+
   it("adds inches exactly (three walls of 5'-4\" are 16 ft, not 16.000000000000004)", () => {
     expect(readWallLengths("5'-4\" + 5'-4\" + 5'-4\"").feet).toBe(16);
   });

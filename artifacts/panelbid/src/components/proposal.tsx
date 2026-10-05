@@ -69,6 +69,13 @@ function toFields(p: Proposal): ProposalFields {
   }
 }
 
+/** A refusal from the server in its own plain words (without "HTTP 409 ..."). */
+function serverWords(err: unknown): string | undefined {
+  const data = (err as { data?: { message?: unknown } } | null)?.data
+  if (data && typeof data.message === "string" && data.message.trim() !== "") return data.message
+  return err instanceof Error ? err.message : undefined
+}
+
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 const multiline = (s: string) => escapeHtml(s).replace(/\n/g, "<br/>")
@@ -213,7 +220,7 @@ export function ProposalSection({
         onError: (err) =>
           toast({
             title: "The proposal was not made",
-            description: err instanceof Error ? err.message : undefined,
+            description: serverWords(err),
             variant: "destructive",
           }),
       },

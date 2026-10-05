@@ -9,6 +9,7 @@ import {
   glueBuckets,
   moldingLengthForSheet,
   moldingLines,
+  sameJson,
   savedTotalPrice,
   setMoldingCount,
   tidyMoldingCounts,
@@ -87,6 +88,15 @@ describe("molding counts", () => {
   it("clearing the typed count goes back to the suggestion", () => {
     const cleared = setMoldingCount(setMoldingCount(rows(), 8, 14), 8, null);
     expect(moldingLines(cleared)[0]).toMatchObject({ count: 9, typed: false });
+  });
+
+  it("clearing leaves no trace on the rows, so the takeoff does not look changed", () => {
+    const cleared = setMoldingCount(setMoldingCount(rows(), 8, 14), 8, null);
+    expect(cleared).toEqual(rows());
+    expect(sameJson(cleared, rows())).toBe(true);
+    // a null left by an older save is tidied away as well
+    const withNull: SheetRow[] = rows().map((r) => ({ ...r, moldingCount: null }));
+    expect(tidyMoldingCounts(withNull)).toEqual(rows());
   });
 
   it("a typed zero is a count, not a blank", () => {

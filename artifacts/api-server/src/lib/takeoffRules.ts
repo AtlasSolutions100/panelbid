@@ -83,8 +83,9 @@ const FEET_AND_INCHES = new RegExp(
   "i",
 );
 const INCHES_ONLY = new RegExp(`^${NUM}${FRACTION}\\s*${INCH_MARK}$`, "i");
-const PLAIN_NUMBER = /^\d+(?:\.\d+)?$/;
-const PLAIN_NUMBERS = /^\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?)+$/;
+// "12." (a number still being typed) reads as 12.
+const PLAIN_NUMBER = /^\d+(?:\.\d*)?$/;
+const PLAIN_NUMBERS = /^\d+(?:\.\d*)?(?:\s+\d+(?:\.\d*)?)+$/;
 
 function straightQuotes(text: string): string {
   return text.replace(/[‘’′]/g, "'").replace(/[“”″]/g, '"');
@@ -558,6 +559,16 @@ export function moldingLines(sheetRows: SheetRow[]): MoldingLine[] {
   });
 }
 
+/** A row with this typed molding count; "not typed" leaves no trace on the row. */
+function withMoldingCount(row: SheetRow, count: number | null): SheetRow {
+  if (count === null) {
+    if (!("moldingCount" in row)) return row;
+    const { moldingCount: _cleared, ...rest } = row;
+    return rest;
+  }
+  return row.moldingCount === count ? row : { ...row, moldingCount: count };
+}
+
 /** Type (or, with null, clear) the molding count for one length. */
 export function setMoldingCount(
   sheetRows: SheetRow[],
@@ -565,7 +576,7 @@ export function setMoldingCount(
   count: number | null,
 ): SheetRow[] {
   return sheetRows.map((r) =>
-    moldingLengthForSheet(r.sheetSize) === lengthFt ? { ...r, moldingCount: count } : r,
+    moldingLengthForSheet(r.sheetSize) === lengthFt ? withMoldingCount(r, count) : r,
   );
 }
 
@@ -575,10 +586,9 @@ export function tidyMoldingCounts(sheetRows: SheetRow[]): SheetRow[] {
   for (const line of moldingLines(sheetRows)) {
     typed.set(line.lengthFt, line.typed ? line.count : null);
   }
-  return sheetRows.map((r) => {
-    const want = typed.get(moldingLengthForSheet(r.sheetSize)) ?? null;
-    return (r.moldingCount ?? null) === want ? r : { ...r, moldingCount: want };
-  });
+  return sheetRows.map((r) =>
+    withMoldingCount(r, typed.get(moldingLengthForSheet(r.sheetSize)) ?? null),
+  );
 }
 
 // ---------------------------------------------------------------------------
