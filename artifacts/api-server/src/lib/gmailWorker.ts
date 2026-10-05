@@ -175,18 +175,33 @@ function isPrivateIp(ip: string): boolean {
  * Throws an Error with a descriptive message if the check fails.
  */
 async function assertSafeUrl(rawUrl: string): Promise<void> {
+  // These messages end up in the log: they name the host, never the link.
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
   } catch {
-    throw new Error(`Invalid URL: ${rawUrl}`);
+    throw new Error("Invalid URL");
   }
   if (parsed.protocol !== "https:") {
-    throw new Error(`Non-HTTPS URL rejected: ${rawUrl}`);
+    throw new Error(`Non-HTTPS URL rejected (host ${parsed.hostname})`);
   }
   const ip = await resolveHostname(parsed.hostname);
   if (isPrivateIp(ip)) {
-    throw new Error(`URL resolves to private/loopback IP (${ip}): ${rawUrl}`);
+    throw new Error(
+      `URL resolves to private/loopback IP (${ip}), host ${parsed.hostname}`,
+    );
+  }
+}
+
+/**
+ * For the log: the host of a link found in an e-mail, never the link itself.
+ * The link is the mail's content and can carry a key to the file.
+ */
+function hostOf(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname;
+  } catch {
+    return "(unreadable)";
   }
 }
 
@@ -215,7 +230,7 @@ async function fetchUrlBody(url: string): Promise<{ buf: Buffer; contentType: st
   clearTimeout(timeout);
 
   if (!resp.ok) {
-    logger.info({ url, status: resp.status }, "PDF URL fetch returned non-OK status");
+    logger.info({ host: hostOf(url), status: resp.status }, "PDF URL fetch returned non-OK status");
     return null;
   }
 
@@ -224,7 +239,7 @@ async function fetchUrlBody(url: string): Promise<{ buf: Buffer; contentType: st
     try {
       await assertSafeUrl(resp.url);
     } catch (err) {
-      logger.warn({ err, originalUrl: url, finalUrl: resp.url }, "SSRF: redirect to disallowed host blocked");
+      logger.warn({ err, host: hostOf(url), finalHost: hostOf(resp.url) }, "SSRF: redirect to disallowed host blocked");
       return null;
     }
   }
@@ -234,7 +249,7 @@ async function fetchUrlBody(url: string): Promise<{ buf: Buffer; contentType: st
   // Reject via Content-Length header before reading anything.
   const contentLength = Number(resp.headers.get("content-length") ?? "0");
   if (contentLength > MAX_INLINE_PDF_BYTES) {
-    logger.warn({ url, contentLength }, "PDF URL too large — skipped");
+    logger.warn({ host: hostOf(url), contentLength }, "PDF URL too large — skipped");
     return null;
   }
 
@@ -250,7 +265,7 @@ async function fetchUrlBody(url: string): Promise<{ buf: Buffer; contentType: st
       totalBytes += value.byteLength;
       if (totalBytes > MAX_INLINE_PDF_BYTES) {
         reader.cancel().catch(() => {});
-        logger.warn({ url, totalBytes }, "PDF URL exceeded size limit mid-stream — skipped");
+        logger.warn({ host: hostOf(url), totalBytes }, "PDF URL exceeded size limit mid-stream — skipped");
         return null;
       }
       chunks.push(value);
@@ -302,23 +317,23 @@ async function tryDownloadUrl(url: string): Promise<Buffer | null> {
       const html = result.buf.toString("utf8");
       const confirmUrl = parseDriveConfirmUrl(html);
       if (confirmUrl) {
-        logger.info({ url, confirmUrl }, "Drive virus-scan confirmation page detected — following confirm link");
+        logger.info({ host: hostOf(url) }, "Drive virus-scan confirmation page detected — following confirm link");
         const confirmed = await fetchUrlBody(confirmUrl);
         if (confirmed && isPdfBytes(confirmed.buf)) return confirmed.buf;
         logger.info(
-          { url, contentType: confirmed?.contentType },
+          { host: hostOf(url), contentType: confirmed?.contentType },
           "Drive confirm follow-up did not yield a PDF",
         );
         return null;
       }
-      logger.info({ url }, "Drive returned HTML but no confirmation form — file likely not publicly accessible");
+      logger.info({ host: hostOf(url) }, "Drive returned HTML but no confirmation form — file likely not publicly accessible");
       return null;
     }
 
-    logger.info({ url, contentType: result.contentType }, "URL did not return a PDF — skipped");
+    logger.info({ host: hostOf(url), contentType: result.contentType }, "URL did not return a PDF — skipped");
     return null;
   } catch (err) {
-    logger.warn({ err, url }, "PDF URL download failed");
+    logger.warn({ err, host: hostOf(url) }, "PDF URL download failed");
     return null;
   }
 }
@@ -388,7 +403,7 @@ export async function pollOnce(): Promise<void> {
       return;
     }
 
-    logger.info({ email: connection.connectedEmail }, "Starting Gmail poll");
+    logger.info({ connectionId: connection.id }, "Starting Gmail poll");
 
     // Build query: messages since last poll, or last 7 days as fallback.
     let query = "in:inbox has:attachment filename:pdf";
@@ -504,7 +519,7 @@ async function processMessage(
     contractor = matchContractor(sender, contractorSources);
     if (contractor) {
       logger.info(
-        { gmailMessageId, contractor: contractor.name },
+        { gmailMessageId, contractorId: contractor.id },
         "Sender matched known contractor source",
       );
     }
@@ -515,7 +530,7 @@ async function processMessage(
         const hit = matchExclusionTerm(subject, sender, exclusionTerms);
         if (hit) {
           const reason = `Filtered — appears to be a bill/notification, not a bid request (matched "${hit.term}" in ${hit.field})`;
-          logger.info({ gmailMessageId, term: hit.term, field: hit.field }, "Email filtered by exclusion term");
+          logger.info({ gmailMessageId, field: hit.field }, "Email filtered by exclusion term");
           await recordOutcome({ gmailMessageId, sender, subject, receivedAt, outcome: "filtered", filterReason: reason, contractor });
           return;
         }
@@ -554,7 +569,7 @@ async function processMessage(
           }
         }
       } catch (err) {
-        logger.warn({ err, gmailMessageId, fileName }, "Failed to download PDF attachment");
+        logger.warn({ err, gmailMessageId }, "Failed to download PDF attachment");
       }
     }
 
@@ -575,7 +590,7 @@ async function processMessage(
     }
 
     if (pdfBuffers.length === 0) {
-      logger.info({ gmailMessageId, subject }, "No PDFs found in email");
+      logger.info({ gmailMessageId }, "No PDFs found in email");
       await recordOutcome({ gmailMessageId, sender, subject, receivedAt, outcome: "no_plans", contractor });
       return;
     }
@@ -626,7 +641,7 @@ async function processMessage(
       try {
         await attachPdfToJob(job.id, buf, name);
       } catch (err) {
-        logger.warn({ err, jobId: job.id, name }, "Failed to attach PDF to job");
+        logger.warn({ err, jobId: job.id }, "Failed to attach PDF to job");
       }
     }
 

@@ -205,7 +205,7 @@ router.get("/gmail/oauth/callback", async (req, res): Promise<void> => {
       }
     }
 
-    req.log.info({ email: profile.emailAddress }, "Gmail connected via OAuth");
+    req.log.info("Gmail connected via OAuth");
     res.redirect(settingsUrl("connected"));
   } catch (err) {
     req.log.error({ err }, "Gmail OAuth callback failed");
