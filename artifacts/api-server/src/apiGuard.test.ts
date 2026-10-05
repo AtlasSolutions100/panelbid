@@ -315,6 +315,29 @@ describe("requests from another website are refused", () => {
     }
   });
 
+  it("takes the browser's own word, even behind a proxy that hides the site's name", async () => {
+    // The server only sees an inside name (here 127.0.0.1) and no
+    // X-Forwarded-Host. A current browser still says "same-origin" itself.
+    const cookie = await signIn(running);
+    const current = await running.call("POST", "/api/auth/sign-out", {
+      cookie,
+      headers: { origin: "https://panelbid.example", "sec-fetch-site": "same-origin" },
+    });
+    expect(current.status).toBe(200);
+    // And a browser's "cross-site" wins over an Origin that looks right.
+    const crossSite = await running.call("POST", "/api/auth/sign-out", {
+      cookie,
+      headers: { origin: running.origin, "sec-fetch-site": "cross-site" },
+    });
+    expect(crossSite.status).toBe(403);
+    // A browser too old to say so is refused there rather than waved through.
+    const old = await running.call("POST", "/api/auth/sign-out", {
+      cookie,
+      headers: { origin: "https://panelbid.example" },
+    });
+    expect(old.status).toBe(403);
+  });
+
   it("trusts the address the proxy says the browser used (X-Forwarded-Host)", async () => {
     const cookie = await signIn(running);
     const reply = await running.call("POST", "/api/auth/sign-out", {

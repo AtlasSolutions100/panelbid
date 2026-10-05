@@ -165,22 +165,26 @@ function isOwnPage(req: Request, value: string): boolean {
 /**
  * Did this request come from one of this site's own pages?
  *
- * Browsers say so themselves: Sec-Fetch-Site on every request (all current
- * browsers), Origin on every request that changes something, Referer
- * otherwise. A page on another site cannot fake any of the three. A request
- * with none of them is not from a browser page at all (a script on the
- * owner's own computer, a health checker), so there is nobody to protect.
+ * Browsers say so themselves, and a page on another site cannot fake it:
+ *
+ * - Sec-Fetch-Site, on every request from every current browser. It is the
+ *   browser's own word, so when it is there nothing else is compared. That
+ *   also keeps this working behind a proxy that hides the site's public
+ *   name from the server.
+ * - Older browsers send Origin on every request that changes something, or
+ *   Referer; those are compared with the name this request was sent to.
+ *
+ * A request with none of the three is not from a browser page at all (a
+ * script on the owner's own computer, a health checker), so there is nobody
+ * to protect.
  */
 function cameFromThisSite(req: Request, allowTypedAddress: boolean): boolean {
   const site = header(req, "sec-fetch-site")?.toLowerCase();
   if (site !== undefined) {
-    const fine =
-      site === "same-origin" || (allowTypedAddress && site === "none");
-    if (!fine) return false;
+    return site === "same-origin" || (allowTypedAddress && site === "none");
   }
   const origin = header(req, "origin");
   if (origin !== undefined) return isOwnPage(req, origin);
-  if (site !== undefined) return true;
   const referer = header(req, "referer");
   if (referer !== undefined) return isOwnPage(req, referer);
   return true;

@@ -122,9 +122,10 @@ Next steps, in this order: an account per person, a password reset, roles.
 - Open without a session: `GET /api/healthz` and `POST /api/auth/sign-in`. Nothing else. Google's return address
   (`GET /api/gmail/oauth/callback`) needs the session cookie and the one-time signed state; without a session it
   redirects to the page and never uses the code Google sent.
-- There is no CORS on purpose. A request that changes something must carry this site's own `Origin` (or
-  `Sec-Fetch-Site: same-origin`). The cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` whenever `NODE_ENV` is
-  `production` or the request came over https.
+- There is no CORS on purpose. A request that changes something must come from this site's own pages: the
+  browser's own `Sec-Fetch-Site: same-origin`, or, from a browser too old to send that, an `Origin` or `Referer` on
+  the name the request was sent to (`Host` or `X-Forwarded-Host`). The cookie is `HttpOnly`, `SameSite=Lax`, and
+  `Secure` whenever `NODE_ENV` is `production` or the request came over https.
 - The address used for the "five wrong passwords" count is the first entry of `X-Forwarded-For`, else the
   connection's address. A caller can fake that header, which is why there is also one budget for the whole site
   (30 wrong passwords at once, then 3 a minute). If the host is known to put the real address in a fixed place,
