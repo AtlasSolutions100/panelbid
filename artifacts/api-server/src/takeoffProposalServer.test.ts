@@ -237,6 +237,13 @@ describe("a sheet count is a whole number of 0 or more: the server refuses anyth
     expect(JSON.stringify(memory.takeoff)).toBe(before);
   });
 
+  it("refuses it on a first save too: no takeoff is created", async () => {
+    const reply = await send("PUT", "/takeoff", takeoff({ sheetRows: [{ sheetsNeeded: 8.5, sheetSize: "4x8", pricePerSheet: 45.5 }] }));
+    expect(reply.status).toBe(400);
+    expect(String(reply.json?.message)).toMatch(/^The takeoff was not saved\. Sheet row 1: the sheet count/);
+    expect(memory.takeoff).toBeNull();
+  });
+
   it("stores whole counts exactly as sent, old-shape rows included", async () => {
     const old = takeoff({ sheetRows: [{ sheetsNeeded: 18, sheetSize: "4x8", pricePerSheet: 45.5 }] });
     const reply = await send("PUT", "/takeoff", old);
@@ -245,5 +252,60 @@ describe("a sheet count is a whole number of 0 or more: the server refuses anyth
     expect(memory.writes).toEqual(["takeoffs"]);
     // a count of 0 is a count
     expect((await send("PUT", "/takeoff", withCount(0))).status).toBe(200);
+  });
+});
+
+describe("no negative money or quantity is stored", () => {
+  const pricedRow = { sheetsNeeded: 10, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "typed" };
+
+  it.each([
+    [{ freight: -1460 }, "Freight cannot be below 0 (it is -1460)."],
+    [{ laborRate: -65 }, "The labor rate cannot be below 0 (it is -65)."],
+    [{ laborDays: -2 }, "The labor days cannot be below 0 (it is -2)."],
+    [{ laborHoursPerDay: -8 }, "The labor hours a day cannot be below 0 (it is -8)."],
+    [{ travelMiles: -40 }, "The travel miles cannot be below 0 (it is -40)."],
+    [{ hotelNights: -1 }, "The hotel nights cannot be below 0 (it is -1)."],
+    [{ profitOverride: -100 }, "Profit cannot be below 0 (it is -100)."],
+    [{ sheetRows: [{ ...pricedRow, pricePerSheet: -45.5 }] }, "Sheet row 1: the price per sheet cannot be below 0 (it is -45.5)."],
+    [{ sheetRows: [{ ...pricedRow, moldingCount: -3 }] }, "Sheet row 1: the molding count cannot be below 0 (it is -3)."],
+  ])("a takeoff with %j is refused in words and nothing is stored", async (over, words) => {
+    await send("PUT", "/takeoff", takeoff());
+    const before = JSON.stringify(memory.takeoff);
+    memory.writes.length = 0;
+
+    const reply = await send("PUT", "/takeoff", takeoff(over));
+    expect(reply.status).toBe(400);
+    expect(reply.json?.message).toBe(`The takeoff was not saved. ${words}`);
+    expect(memory.writes).toEqual([]);
+    expect(JSON.stringify(memory.takeoff)).toBe(before);
+  });
+
+  it("a proposal price below 0 is refused in words: it is not stored, and not turned into 0", async () => {
+    await send("PUT", "/takeoff", takeoff());
+    await send("POST", "/proposal/generate");
+    memory.writes.length = 0;
+
+    const reply = await send("PATCH", "/proposal", { priceAmount: -5, exclusions: "sent with the bad price" });
+    expect(reply.status).toBe(400);
+    expect(reply.json?.message).toBe(
+      "The proposal was not saved. The price cannot be below 0. Type the total price, or leave the box empty for no price yet.",
+    );
+    expect(memory.writes).toEqual([]);
+    expect(memory.proposal?.priceAmount).toBe(3799);
+    expect(memory.proposal?.exclusions).toBe("");
+  });
+
+  it("an empty box is still no price: 0 is stored as 'not priced', with no words", async () => {
+    // a takeoff with a sheet price left empty (0) is saved, and has no total
+    const saved = await send("PUT", "/takeoff", takeoff({ sheetRows: [{ ...pricedRow, pricePerSheet: 0 }] }));
+    expect(saved.status).toBe(200);
+    expect(saved.json?.totalPrice).toBe(0);
+    // a proposal whose price box was emptied is saved with no price and no words
+    await send("POST", "/proposal/generate");
+    await send("PATCH", "/proposal", { priceAmount: 4100 });
+    const emptied = await send("PATCH", "/proposal", { priceAmount: 0 });
+    expect(emptied.status).toBe(200);
+    expect(emptied.json?.priceAmount).toBe(0);
+    expect(emptied.json?.priceInWords).toBe("");
   });
 });

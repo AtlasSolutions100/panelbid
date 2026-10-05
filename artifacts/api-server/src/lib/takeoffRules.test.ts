@@ -245,6 +245,61 @@ describe("a sheet count is a whole number of 0 or more", () => {
   });
 });
 
+describe("no negative money or quantity is stored", () => {
+  it("refuses each figure below 0, in words that name it", () => {
+    expect(checkTakeoffNumbers({ ...base, freight: -1460 })).toEqual(["Freight cannot be below 0 (it is -1460)."]);
+    expect(checkTakeoffNumbers({ ...base, laborRate: -65 })).toEqual(["The labor rate cannot be below 0 (it is -65)."]);
+    expect(checkTakeoffNumbers({ ...base, laborDays: -1 })).toEqual(["The labor days cannot be below 0 (it is -1)."]);
+    expect(checkTakeoffNumbers({ ...base, laborHoursPerDay: -8 })).toEqual([
+      "The labor hours a day cannot be below 0 (it is -8).",
+    ]);
+    expect(checkTakeoffNumbers({ ...base, travelMiles: -40 })).toEqual(["The travel miles cannot be below 0 (it is -40)."]);
+    expect(checkTakeoffNumbers({ ...base, hotelNights: -2 })).toEqual(["The hotel nights cannot be below 0 (it is -2)."]);
+    expect(checkTakeoffNumbers({ ...base, profitOverride: -100 })).toEqual(["Profit cannot be below 0 (it is -100)."]);
+  });
+
+  it("refuses a sheet price or a molding count below 0, naming the row", () => {
+    expect(
+      checkTakeoffNumbers({
+        ...base,
+        sheetRows: [
+          { sheetsNeeded: 12, sheetSize: "4x8", pricePerSheet: 45.5 },
+          { sheetsNeeded: 6, sheetSize: "4x10", pricePerSheet: -58.25, moldingCount: -3 },
+        ],
+      }),
+    ).toEqual([
+      "Sheet row 2: the price per sheet cannot be below 0 (it is -58.25).",
+      "Sheet row 2: the molding count cannot be below 0 (it is -3).",
+    ]);
+  });
+
+  it("says everything that is wrong at once", () => {
+    expect(
+      checkTakeoffNumbers({ ...base, sheetRows: [{ sheetsNeeded: -5, sheetSize: "4x8", pricePerSheet: -1 }], freight: -1 }),
+    ).toHaveLength(3);
+  });
+
+  it("an empty box is still 'not priced' (stored as 0), never a price of 0", () => {
+    const blank = {
+      ...base,
+      sheetRows: [{ sheetsNeeded: 12, sheetSize: "4x8" as const, pricePerSheet: 0, moldingCount: null }],
+      laborRate: 0,
+      laborDays: 0,
+      laborHoursPerDay: 0,
+      travelMiles: 0,
+      hotelNights: 0,
+      freight: 0,
+      profitOverride: null,
+    };
+    expect(checkTakeoffNumbers(blank)).toEqual([]);
+    const costs = computeCosts(blank);
+    expect(costs.fullyPriced).toBe(false);
+    expect(costs.notPriced).toEqual(["sheet prices (4x8)", "labor"]);
+    // a profit typed as 0 is his own figure, and is allowed
+    expect(checkTakeoffNumbers({ ...base, profitOverride: 0 })).toEqual([]);
+  });
+});
+
 describe("typing while a save is on its way", () => {
   // A stand-in for the takeoff page: what is on screen (as typed), the copy
   // the server stored, and a Save whose answer is held back until asked for.

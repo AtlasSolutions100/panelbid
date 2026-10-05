@@ -9,6 +9,7 @@ import {
   noPriceRegenerateResult,
   noPriceRegenerateWarning,
   priceFromTakeoff,
+  priceProblem,
   STANDARD_NOTES,
   type ProposalFieldValues,
   type ProposalTakeoff,
@@ -350,6 +351,15 @@ describe("before a proposal is exported", () => {
   it("refuses an empty or zero price", () => {
     expect(checkProposalForExport(fields({ priceAmount: "" })).problems.length).toBe(1);
     expect(checkProposalForExport(fields({ priceAmount: "0" })).problems.length).toBe(1);
+  });
+
+  it("a price below 0 is never stored: the server refuses it in words", () => {
+    expect(priceProblem(-5)).toBe(
+      "The price cannot be below 0. Type the total price, or leave the box empty for no price yet.",
+    );
+    expect(priceProblem(-0.01)).not.toBeNull();
+    expect(priceProblem(0)).toBeNull(); // an empty box: no price yet
+    expect(priceProblem(4100)).toBeNull();
   });
 
   it("refuses while the FRP line still has a blank marked ___", () => {

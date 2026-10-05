@@ -808,10 +808,28 @@ function shown(value: unknown): string {
   return typeof value === "number" ? String(value) : (JSON.stringify(value) ?? String(value));
 }
 
+/** A number that is below 0, or not a real number at all (1e999). */
+function belowZero(value: unknown): boolean {
+  return typeof value === "number" && !(Number.isFinite(value) && value >= 0);
+}
+
+const NEVER_BELOW_ZERO: [key: keyof CostInput, name: string][] = [
+  ["laborRate", "The labor rate"],
+  ["laborDays", "The labor days"],
+  ["laborHoursPerDay", "The labor hours a day"],
+  ["travelMiles", "The travel miles"],
+  ["hotelNights", "The hotel nights"],
+  ["freight", "Freight"],
+  ["profitOverride", "Profit"],
+];
+
 /**
  * Why a takeoff cannot be stored, in plain words. Empty = fine.
  *
- * A sheet count is a whole number of 0 or more. Nothing is put right
+ * A sheet count is a whole number of 0 or more. No money and no quantity is
+ * below 0: sheet prices, molding counts, the labor rate, days, hours, miles,
+ * nights, freight, profit. (0 itself is fine: an empty price box is stored as
+ * 0 and means "not priced", never a price of $0.00.) Nothing is put right
  * silently.
  *
  * The server runs this on what was sent, before anything is stored. The page
@@ -830,7 +848,18 @@ export function checkTakeoffNumbers(takeoff: unknown): string[] {
         `${where}: the sheet count must be a whole number of 0 or more (it is ${shown(count)}).`,
       );
     }
+    if (belowZero(row.pricePerSheet)) {
+      problems.push(`${where}: the price per sheet cannot be below 0 (it is ${shown(row.pricePerSheet)}).`);
+    }
+    if (belowZero(row.moldingCount)) {
+      problems.push(`${where}: the molding count cannot be below 0 (it is ${shown(row.moldingCount)}).`);
+    }
   });
+  for (const [key, name] of NEVER_BELOW_ZERO) {
+    if (belowZero(data[key])) {
+      problems.push(`${name} cannot be below 0 (it is ${shown(data[key])}).`);
+    }
+  }
   return problems;
 }
 

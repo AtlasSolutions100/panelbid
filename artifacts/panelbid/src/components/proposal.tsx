@@ -273,8 +273,13 @@ export function ProposalSection({
           setDirty(false)
           onSaved?.()
         },
-        onError: () =>
-          toast({ title: "Failed to save proposal", variant: "destructive" }),
+        onError: (err) =>
+          toast({
+            title: "Failed to save proposal",
+            // the server's own words when it refused (a price below 0, say)
+            description: (err as { data?: { message?: unknown } } | null)?.data ? serverWords(err) : undefined,
+            variant: "destructive",
+          }),
       },
     )
   }

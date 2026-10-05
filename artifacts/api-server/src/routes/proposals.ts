@@ -17,7 +17,11 @@ import {
   GenerateProposalParams,
   GenerateProposalResponse,
 } from "@workspace/api-zod";
-import { buildProposalValues, sheetAllotment } from "../lib/proposalRules";
+import {
+  buildProposalValues,
+  priceProblem,
+  sheetAllotment,
+} from "../lib/proposalRules";
 import {
   amountInWords,
   refreshSuggestedRows,
@@ -167,11 +171,19 @@ router.patch("/jobs/:jobId/proposal", async (req, res): Promise<void> => {
   // price is sent, the words are written from it here. Words sent by the
   // browser are never stored on their own.
   const { priceInWords: _ignoredWords, ...edits } = body.data;
+  // A price below 0 is refused in words. It is not turned into 0 silently:
+  // nothing of the request is stored.
+  const refused =
+    edits.priceAmount === undefined ? null : priceProblem(edits.priceAmount);
+  if (refused !== null) {
+    res.status(400).json({ message: `The proposal was not saved. ${refused}` });
+    return;
+  }
   const price =
     edits.priceAmount === undefined
       ? {}
       : (() => {
-          const priceAmount = roundToCents(Math.max(0, edits.priceAmount));
+          const priceAmount = roundToCents(edits.priceAmount);
           return {
             priceAmount,
             priceInWords: priceAmount > 0 ? amountInWords(priceAmount) : "",
