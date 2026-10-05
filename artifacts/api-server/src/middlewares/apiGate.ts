@@ -123,8 +123,15 @@ function cookieSettings(req: Request) {
   };
 }
 
-function settingsOf(res: Response): ReadySettings {
-  return res.locals.authSettings as ReadySettings;
+// The settings read for a request, handed from the "is it set up" step to
+// the steps after it. Kept here, out of sight, and not on req or res.locals
+// where a later log line or page template could pick the password up.
+const settingsByRequest = new WeakMap<Request, ReadySettings>();
+
+function settingsOf(req: Request): ReadySettings {
+  const settings = settingsByRequest.get(req);
+  if (!settings) throw new Error("apiGate: settings were not read for this request");
+  return settings;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +242,7 @@ gate.use((req: Request, res: Response, next: NextFunction): void => {
     );
     return;
   }
-  res.locals.authSettings = settings;
+  settingsByRequest.set(req, settings);
   next();
 });
 
@@ -257,7 +264,7 @@ gate.post(
   "/auth/sign-in",
   express.json({ limit: "2kb" }),
   (req: Request, res: Response): void => {
-    const settings = settingsOf(res);
+    const settings = settingsOf(req);
     const address = clientAddress(req);
 
     // Nothing between this check and recording the result waits for
@@ -277,7 +284,9 @@ gate.post(
         allowed.scope === "address"
           ? `Too many wrong passwords. Wait ${inWords(wait)}, then try again.`
           : `Sign-in is paused for a moment after too many wrong passwords. Try again in ${inWords(wait)}.`,
-        { retryAfterSeconds: wait },
+        // "address": this address typed too many. "site": guessing from
+        // many addresses used up the shared budget. The page words it.
+        { retryAfterSeconds: wait, scope: allowed.scope },
       );
       return;
     }
@@ -333,7 +342,7 @@ gate.post(
 
 // 5. Everything else needs a session.
 gate.use((req: Request, res: Response, next: NextFunction): void => {
-  const settings = settingsOf(res);
+  const settings = settingsOf(req);
   const now = Date.now();
   const cookie: unknown = req.cookies?.[SESSION_COOKIE];
   const session = readSession(settings.key, cookie, now);

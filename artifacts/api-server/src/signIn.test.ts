@@ -276,6 +276,7 @@ describe("slowing down guesses", () => {
     const during = await tryPassword(TEST_PASSWORD, A);
     expect(during.status).toBe(429);
     expect(during.json?.code).toBe("too_many_attempts");
+    expect(during.json?.scope).toBe("address");
     expect(during.headers["retry-after"]).toBe("30");
     expect(during.setCookies).toEqual([]);
 
@@ -356,6 +357,7 @@ describe("slowing down guesses", () => {
     const blocked = await tryPassword(TEST_PASSWORD, fresh);
     expect(blocked.status).toBe(429);
     expect(blocked.json?.code).toBe("too_many_attempts");
+    expect(blocked.json?.scope).toBe("site");
     expect(Number(blocked.headers["retry-after"])).toBeLessThanOrEqual(20);
 
     // It opens again by itself, one try per 20 seconds.

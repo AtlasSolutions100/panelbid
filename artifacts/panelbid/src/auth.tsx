@@ -32,6 +32,7 @@ interface ServerSays {
   message?: string
   missing?: unknown
   retryAfterSeconds?: unknown
+  scope?: unknown
 }
 
 async function readJson(response: Response): Promise<ServerSays> {
@@ -316,7 +317,11 @@ function SignIn({ notice, onSignedIn, onNotSetUp }: SignInProps) {
       if (response.status === 401) {
         setError("Wrong password.")
       } else if (response.status === 429) {
-        setError("Too many wrong passwords.")
+        setError(
+          says.scope === "site"
+            ? "Sign-in is paused for a moment: someone keeps typing wrong passwords."
+            : "Too many wrong passwords.",
+        )
       } else {
         setError(says.message ?? "Sign-in did not work. Try again.")
       }
