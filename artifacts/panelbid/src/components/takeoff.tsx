@@ -39,42 +39,21 @@ import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { Plus, Trash2, Save, Calculator, Upload, FileText, Sparkles, Loader2, ChevronDown } from "lucide-react"
 
-const SHEET_SIZES: SheetSize[] = ["4x4", "4x8", "4x10", "4x12"]
-
-/** Square footage of a takeoff sheet size, e.g. "4x8" → 32. */
-function sheetAreaSqft(size: SheetSize): number {
-  const [w, l] = size.split("x").map(Number)
-  return (w ?? 0) * (l ?? 0)
-}
-
-/**
- * Resolve a picked price item to a price per sheet for a row of the given
- * sheet size: prefer the printed price per sheet, else compute from price
- * per sqft × row sheet area. Null when the item has neither.
- */
-function resolvePricePerSheet(item: PriceSheetItem, rowSize: SheetSize): number | null {
-  if (item.pricePerSheet != null) return item.pricePerSheet
-  if (item.pricePerSqft != null) {
-    return Math.round(item.pricePerSqft * sheetAreaSqft(rowSize) * 100) / 100
-  }
-  return null
-}
-
-const OVERTIME_RATE = 34
-const TRAVEL_MULTIPLIER = 8 * 1.5
-const HOTEL_NIGHTLY = 375
-const PROFIT_FLAT = 800
-const PROFIT_PER_DAY = 1000
-const PROFIT_SHEET_THRESHOLD = 8
-
-// Parse wall lengths entered like "8 + 8 + 8.5, 12" into numbers.
-function parseWallLengths(input: string): number[] {
-  return (input.match(/\d+(?:\.\d+)?/g) ?? []).map(Number)
-}
-
-function linearFootage(input: string): number {
-  return parseWallLengths(input).reduce((a, b) => a + b, 0)
-}
+// Every takeoff rule (wall lengths, sheets, cost lines, the total) comes from
+// the shared rules file. No rule is written in this page.
+import {
+  SHEET_SIZES,
+  OVERTIME_RATE,
+  HOTEL_NIGHTLY,
+  PROFIT_FLAT,
+  PROFIT_PER_DAY,
+  PROFIT_SHEET_THRESHOLD,
+  computeCosts,
+  flatProfitApplies,
+  linearFootage,
+  resolvePricePerSheet,
+  sheetAreaSqft,
+} from "@/lib/takeoff-rules"
 
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" })
@@ -274,27 +253,20 @@ export function TakeoffSection({ job, files }: { job: Job; files: JobFile[] }) {
   }, [takeoff, jobId])
 
   // Live calculations
-  const totals = useMemo(() => {
-    const materials = sheetRows.reduce(
-      (sum, r) => sum + r.sheetsNeeded * r.pricePerSheet,
-      0,
-    )
-    const totalSheets = sheetRows.reduce((sum, r) => sum + r.sheetsNeeded, 0)
-    const rate = num(laborRate)
-    const days = num(laborDays)
-    const hours = num(laborHoursPerDay)
-    const labor = rate * days * hours
-    const overtimeHours = Math.max(0, hours - 10) * days
-    const overtime = overtimeHours * OVERTIME_RATE
-    const travel = num(travelMiles) * TRAVEL_MULTIPLIER
-    const hotel = num(hotelNights) * HOTEL_NIGHTLY
-    const freightAmt = num(freight)
-    const autoProfit =
-      totalSheets < PROFIT_SHEET_THRESHOLD ? PROFIT_FLAT : PROFIT_PER_DAY * days
-    const profit = profitOverride !== null ? num(profitOverride) : autoProfit
-    const total = materials + labor + overtime + travel + hotel + freightAmt + profit
-    return { materials, totalSheets, labor, overtime, overtimeHours, travel, hotel, freight: freightAmt, autoProfit, profit, total }
-  }, [sheetRows, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, profitOverride])
+  const totals = useMemo(
+    () =>
+      computeCosts({
+        sheetRows,
+        laborRate: num(laborRate),
+        laborDays: num(laborDays),
+        laborHoursPerDay: num(laborHoursPerDay),
+        travelMiles: num(travelMiles),
+        hotelNights: num(hotelNights),
+        freight: num(freight),
+        profitOverride: profitOverride !== null ? num(profitOverride) : null,
+      }),
+    [sheetRows, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, profitOverride],
+  )
 
   const updateRoomRow = (i: number, patch: Partial<TakeoffRoomRow>) =>
     setRoomRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
@@ -817,7 +789,7 @@ export function TakeoffSection({ job, files }: { job: Job; files: JobFile[] }) {
                         reset to auto ({money(totals.autoProfit)})
                       </button>
                     ) : (
-                      <span>auto: {totals.totalSheets < PROFIT_SHEET_THRESHOLD ? `$${PROFIT_FLAT} flat (< ${PROFIT_SHEET_THRESHOLD} sheets)` : `$${PROFIT_PER_DAY}/day`}</span>
+                      <span>auto: {flatProfitApplies(totals.totalSheets) ? `$${PROFIT_FLAT} flat (< ${PROFIT_SHEET_THRESHOLD} sheets)` : `$${PROFIT_PER_DAY}/day`}</span>
                     )}
                   </div>
                 </dt>
