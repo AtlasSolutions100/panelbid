@@ -28,7 +28,7 @@ Bidding workflow tool for a wall panel installation company (FRP, stainless stee
 - Frontend: `artifacts/panelbid/` (react-vite at `/`); theme in `src/index.css`
 - Uploaded PDFs: `artifacts/api-server/uploads/<jobId>/` (local disk, path in `job_files.file_path`)
 - Takeoff and proposal rules, in ONE place: `artifacts/api-server/src/lib/takeoffRules.ts` (wall lengths, panel height, suggested sheets, moldings, glue, cost lines, the total, typed dollar amounts), `proposalRules.ts` (FRP line, generate / regenerate, export checks) and `materialList.ts` (the Material list and its printed page). They are pure (no database, no browser). The page reads them through `artifacts/panelbid/src/lib/takeoff-rules.ts`. Never write a rule in the page or in a route.
-- Rule tests (pure, no database needed): `pnpm --filter @workspace/api-server exec vitest run src/lib/takeoffRules.test.ts src/lib/proposalRules.test.ts src/lib/takeoffSuggest.test.ts src/lib/takeoffMaterials.test.ts src/lib/materialList.test.ts`
+- Rule tests (pure, no database needed): `pnpm --filter @workspace/api-server run test:rules` (100 tests in five files under `artifacts/api-server/src/lib/`)
 
 ## Takeoff rules (the client's own answers, 2026-10-05)
 

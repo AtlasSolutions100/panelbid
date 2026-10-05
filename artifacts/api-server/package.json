@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:rules": "vitest run src/lib/takeoffRules.test.ts src/lib/proposalRules.test.ts src/lib/takeoffSuggest.test.ts src/lib/takeoffMaterials.test.ts src/lib/materialList.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",
