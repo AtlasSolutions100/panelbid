@@ -171,6 +171,15 @@ describe("suggested sheets for a room", () => {
     expect(s.height.assumed).toBe(true);
   });
 
+  it("flags a panel taller than his longest sheet instead of quietly counting one row of sheets", () => {
+    const tall = suggestRoom(room({ wallLengths: "40", ceilingHeight: "14'-0\"" }));
+    expect(tall.sheets).toBe(10);
+    expect(tall.sheetSize).toBe("4x12");
+    expect(tall.warning).toMatch(/14 ft.*taller than a 12 ft sheet/);
+    expect(suggestRoom(room({ wallLengths: "40", materialHeight: "12'" })).warning).toBeNull();
+    expect(suggestRoom(room({ wallLengths: "40", materialHeight: "8'" })).warning).toBeNull();
+  });
+
   it("suggests nothing, and says why, without a wall length or a height", () => {
     expect(suggestRoom(room({ materialHeight: "8" }))).toMatchObject({ sheets: null, sheetSize: "4x8" });
     expect(suggestRoom(room({ materialHeight: "8" })).problem).toMatch(/wall length/);

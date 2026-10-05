@@ -17,6 +17,7 @@ import {
 import {
   draftRoomRows,
   refreshSuggestedRows,
+  sameJson,
   savedTotalPrice,
   tidyMoldingCounts,
 } from "../lib/takeoffRules";
@@ -155,11 +156,30 @@ router.put("/jobs/:jobId/takeoff", async (req, res): Promise<void> => {
     updatedAt: new Date(),
   };
 
-  const [saved] = await db
-    .insert(takeoffsTable)
-    .values(values)
-    .onConflictDoUpdate({ target: takeoffsTable.jobId, set: values })
-    .returning();
+  // A save that changes nothing leaves the stored takeoff, and its saved
+  // time, alone. Otherwise pressing Save twice would make the proposal look
+  // older than the takeoff and block its export for no reason.
+  const [before] = await db
+    .select()
+    .from(takeoffsTable)
+    .where(eq(takeoffsTable.jobId, jobId));
+  const { updatedAt: _now, ...content } = values;
+  const unchanged =
+    before !== undefined &&
+    sameJson(
+      Object.fromEntries(
+        Object.keys(content).map((k) => [k, (before as Record<string, unknown>)[k]]),
+      ),
+      content,
+    );
+
+  const [saved] = unchanged
+    ? [before]
+    : await db
+        .insert(takeoffsTable)
+        .values(values)
+        .onConflictDoUpdate({ target: takeoffsTable.jobId, set: values })
+        .returning();
 
   // First save moves the job forward in the pipeline.
   if (job.status === "takeoff") {

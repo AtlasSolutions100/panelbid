@@ -323,7 +323,12 @@ export interface RoomSuggestion {
   arithmetic: string;
   /** Why there is no suggestion, in words. Null when there is one. */
   problem: string | null;
+  /** Something to check about a suggestion that IS given. Null when nothing. */
+  warning: string | null;
 }
+
+/** His longest sheet. A panel taller than this cannot be covered by one sheet. */
+export const LONGEST_SHEET_FT = 12;
 
 /**
  * Suggested sheets for one room: wall length ÷ the 4 ft sheet width, rounded
@@ -340,8 +345,14 @@ export function suggestRoom(row: RoomRow): RoomSuggestion {
   else if (wall.units <= 0) problem = "no wall length typed";
   else if (sheetSize === null) problem = height.note;
   if (problem !== null || sheetSize === null) {
-    return { wall, height, sheets: null, sheetSize, arithmetic: "", problem };
+    return { wall, height, sheets: null, sheetSize, arithmetic: "", problem, warning: null };
   }
+  // His sizes stop at 4x12. Above that the count below is one sheet per 4 ft
+  // of wall only, which is too few: say so rather than let it pass.
+  const warning =
+    height.feet !== null && height.feet > LONGEST_SHEET_FT
+      ? `the panel is ${feetText(height.feet)} high, taller than a ${LONGEST_SHEET_FT} ft sheet: this counts one 4x12 for each 4 ft of wall only`
+      : null;
   const sheetUnits = SHEET_WIDTH_FT * UNITS_PER_FOOT;
   const sheets = Math.ceil(wall.units / sheetUnits);
   const noun = sheets === 1 ? "sheet" : "sheets";
@@ -350,7 +361,7 @@ export function suggestRoom(row: RoomRow): RoomSuggestion {
     wall.units % sheetUnits === 0
       ? `${start}${sheets} ${noun} of ${sheetSize}`
       : `${start}${plain(wall.feet / SHEET_WIDTH_FT)}, rounded up to ${sheets} ${noun} of ${sheetSize}`;
-  return { wall, height, sheets, sheetSize, arithmetic, problem: null };
+  return { wall, height, sheets, sheetSize, arithmetic, problem: null, warning };
 }
 
 export interface JobSuggestion {

@@ -545,7 +545,10 @@ export function TakeoffSection({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={saveTakeoff.isPending}
+            // Nothing to save: the button is off, so a proposal is not marked
+            // "older than the takeoff" by a save that changed nothing. (A job
+            // still in Takeoff status can always be saved: that moves it on.)
+            disabled={saveTakeoff.isPending || (!unsaved && job.status !== "takeoff")}
             size="sm"
             className="font-mono uppercase tracking-wider text-xs"
             data-testid="button-save-takeoff"
@@ -637,6 +640,11 @@ export function TakeoffSection({
                       <>
                         <div className="font-mono font-medium">{rs.sheets} × {rs.sheetSize}</div>
                         <div className="text-[10px] text-muted-foreground">{rs.arithmetic}</div>
+                        {rs.warning && (
+                          <div className="mt-0.5 text-[10px] font-medium text-amber-700" data-testid={`text-room-warning-${i}`}>
+                            {rs.warning}
+                          </div>
+                        )}
                       </>
                     ) : (
                       <span className="text-[10px] text-muted-foreground">{rs?.problem ?? "—"}</span>

@@ -134,6 +134,14 @@ describe("material list", () => {
     expect(materialListHtml(withGap)).toContain("Storage 104");
   });
 
+  it("warns on the list when a panel is taller than a 12 ft sheet", () => {
+    const tall = buildMaterialList(
+      input({ roomRows: [room({ roomName: "Warehouse", roomNumber: "120", wallLengths: "40", ceilingHeight: "14'" })], sheetRows: [] }),
+    );
+    expect(tall.assumptions.join("\n")).toMatch(/Warehouse 120: .*14 ft.*taller than a 12 ft sheet/);
+    expect(buildMaterialList(input()).assumptions.join("\n")).not.toMatch(/taller than/);
+  });
+
   it("escapes what a person typed before it goes into the printed page", () => {
     const html = materialListHtml(buildMaterialList(input({ jobName: "Bob's <b>Diner</b> & Grill" })));
     expect(html).toContain("Bob's &lt;b&gt;Diner&lt;/b&gt; &amp; Grill");

@@ -154,6 +154,10 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
       );
     }
   });
+  roomRows.forEach((row, index) => {
+    const warning = suggestion.rooms[index]!.warning;
+    if (warning) assumptions.push(`${roomLabel(row, index)}: ${warning}. Add the sheets above 12 ft yourself.`);
+  });
   for (const s of sheets) {
     if (s.whose === "suggested") continue;
     assumptions.push(
