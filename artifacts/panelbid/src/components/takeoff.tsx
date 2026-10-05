@@ -344,6 +344,10 @@ export function TakeoffSection({
     showTakeoff(takeoff)
   }, [takeoff, jobId])
 
+  // The profit he typed, or null for automatic. An empty box is automatic.
+  const typedProfit =
+    profitOverride !== null && profitOverride.trim() !== "" ? num(profitOverride) : null
+
   // What would be saved if Save were pressed now.
   const currentData: TakeoffData = useMemo(
     () => ({
@@ -356,11 +360,11 @@ export function TakeoffSection({
       travelMiles: num(travelMiles),
       hotelNights: num(hotelNights),
       freight: num(freight),
-      profitOverride: profitOverride !== null ? num(profitOverride) : null,
+      profitOverride: typedProfit,
       notes: null,
       thickness: thickness.trim() !== "" ? thickness.trim() : null,
     }),
-    [roomRows, sheetRows, priceSheetFileId, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, profitOverride, thickness],
+    [roomRows, sheetRows, priceSheetFileId, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, typedProfit, thickness],
   )
 
   // The proposal is only ever made from a saved takeoff, so the page has to
@@ -382,9 +386,9 @@ export function TakeoffSection({
         travelMiles: num(travelMiles),
         hotelNights: num(hotelNights),
         freight: num(freight),
-        profitOverride: profitOverride !== null ? num(profitOverride) : null,
+        profitOverride: typedProfit,
       }),
-    [sheetRows, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, profitOverride],
+    [sheetRows, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, typedProfit],
   )
 
   // The suggested sheet count for each room and for the job, with its working.
@@ -1081,10 +1085,10 @@ export function TakeoffSection({
                       className="h-7 w-24 text-xs font-mono"
                       value={profitOverride !== null ? profitOverride : box(totals.autoProfit)}
                       placeholder="auto"
-                      onChange={(e) => setProfitOverride(e.target.value === "" ? null : e.target.value)}
+                      onChange={(e) => setProfitOverride(e.target.value)}
                       data-testid="input-profit"
                     />
-                    {profitOverride !== null ? (
+                    {typedProfit !== null ? (
                       <button type="button" className="underline decoration-dotted hover:text-foreground" onClick={() => setProfitOverride(null)} data-testid="button-reset-profit">
                         reset to auto ({money(totals.autoProfit)})
                       </button>
@@ -1094,7 +1098,7 @@ export function TakeoffSection({
                   </div>
                 </dt>
                 <dd className="font-mono font-medium" data-testid="text-profit-total">
-                  {profitOverride !== null || totals.profit > 0 ? (
+                  {typedProfit !== null || totals.profit > 0 ? (
                     money(totals.profit)
                   ) : (
                     <span className="text-muted-foreground font-sans font-normal">not set: type the labor days</span>
