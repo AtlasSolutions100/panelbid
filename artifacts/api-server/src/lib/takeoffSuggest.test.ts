@@ -180,6 +180,40 @@ describe("suggested sheets for a room", () => {
     expect(suggestRoom(room({ wallLengths: "40", materialHeight: "8'" })).warning).toBeNull();
   });
 
+  it("flags a panel of 4 ft or less: a 4x8 cut in half covers 8 ft of wall, so the count may be about half", () => {
+    // 34 ft of wall. The count is NOT changed (he has not given his rule): it is flagged.
+    const four = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "4'" }));
+    expect(four.sheets).toBe(9);
+    expect(four.sheetSize).toBe("4x8");
+    expect(four.arithmetic).toBe("34 ft of wall ÷ 4 ft a sheet = 8.5, rounded up to 9 sheets of 4x8");
+    expect(four.warning).toBe(
+      "the panel is 4 ft high: this counts one full 4x8 for every 4 ft of wall, " +
+        "but one 4x8 cut in half covers 8 ft of wall, so the true count may be about half: tell us your rule",
+    );
+    // 48 inches is the same panel
+    const inches = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: '48"' }));
+    expect(inches.sheets).toBe(9);
+    expect(inches.warning).toBe(four.warning);
+    // lower still (3'-8"), and a 4 ft height that came from the ceiling box
+    expect(suggestRoom(room({ wallLengths: "34", materialHeight: "3'-8\"" })).warning).toMatch(
+      /^the panel is 3 ft 8 in high: .*may be about half: tell us your rule$/,
+    );
+    expect(suggestRoom(room({ wallLengths: "34", ceilingHeight: "4'-0\"" })).warning).toBe(four.warning);
+  });
+
+  it("does not flag a panel above 4 ft: 4.01 ft and 8 ft read as before", () => {
+    const justOver = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "4.01" }));
+    expect(justOver.sheets).toBe(9);
+    expect(justOver.sheetSize).toBe("4x8");
+    expect(justOver.warning).toBeNull();
+    expect(suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "4'-0 1/2\"" })).warning).toBeNull();
+    const eight = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "8'" }));
+    expect(eight.sheets).toBe(9);
+    expect(eight.warning).toBeNull();
+    // and the taller-than-12-ft warning is still its own line
+    expect(suggestRoom(room({ wallLengths: "40", ceilingHeight: "14'-0\"" })).warning).toMatch(/taller than a 12 ft sheet/);
+  });
+
   it("suggests nothing, and says why, without a wall length or a height", () => {
     expect(suggestRoom(room({ materialHeight: "8" }))).toMatchObject({ sheets: null, sheetSize: "4x8" });
     expect(suggestRoom(room({ materialHeight: "8" })).problem).toMatch(/wall length/);

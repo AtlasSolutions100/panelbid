@@ -6,6 +6,7 @@
  */
 import {
   GLUE_SHEETS_PER_BUCKET,
+  LONGEST_SHEET_FT,
   SHEET_SIZES,
   feetText,
   glueBuckets,
@@ -155,8 +156,14 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
     }
   });
   roomRows.forEach((row, index) => {
-    const warning = suggestion.rooms[index]!.warning;
-    if (warning) assumptions.push(`${roomLabel(row, index)}: ${warning}. Add the sheets above 12 ft yourself.`);
+    const { warning, height } = suggestion.rooms[index]!;
+    if (!warning) return;
+    // The same line the room's row shows: a panel taller than a 12 ft sheet,
+    // or a panel of 4 ft or less (the count may be about half).
+    const tooTall = height.feet !== null && height.feet > LONGEST_SHEET_FT;
+    assumptions.push(
+      `${roomLabel(row, index)}: ${warning}.${tooTall ? " Add the sheets above 12 ft yourself." : ""}`,
+    );
   });
   for (const s of sheets) {
     if (s.whose === "suggested") continue;

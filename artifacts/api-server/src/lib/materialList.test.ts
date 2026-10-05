@@ -142,6 +142,37 @@ describe("material list", () => {
     expect(buildMaterialList(input()).assumptions.join("\n")).not.toMatch(/taller than/);
   });
 
+  it("says on the list when a panel is 4 ft or less: the count may be about half", () => {
+    const wainscot = (height: string) =>
+      buildMaterialList(
+        input({
+          roomRows: [room({ roomName: "Dining", roomNumber: "110", wallLengths: "12 + 12 + 10", materialHeight: height })],
+          sheetRows: applySuggestions([], [room({ wallLengths: "12 + 12 + 10", materialHeight: height })], []),
+        }),
+      );
+    const line =
+      "Dining 110: the panel is 4 ft high: this counts one full 4x8 for every 4 ft of wall, " +
+      "but one 4x8 cut in half covers 8 ft of wall, so the true count may be about half: tell us your rule.";
+    for (const height of ["4'", '48"']) {
+      const list = wainscot(height);
+      expect(list.assumptions).toContain(line);
+      // the count itself is not changed
+      expect(list.sheets).toEqual([
+        { size: "4x8", count: 9, whose: "suggested", suggested: 9, price: null, total: null },
+      ]);
+      expect(materialListHtml(list)).toContain("so the true count may be about half: tell us your rule.");
+      expect(list.assumptions.join("\n")).not.toMatch(/above 12 ft/);
+    }
+    for (const height of ["4.01", "8'"]) {
+      expect(wainscot(height).assumptions.join("\n")).not.toMatch(/about half/);
+    }
+    // the taller-than-12-ft line keeps its own ending
+    const tall = buildMaterialList(
+      input({ roomRows: [room({ roomName: "Warehouse", roomNumber: "120", wallLengths: "40", ceilingHeight: "14'" })], sheetRows: [] }),
+    );
+    expect(tall.assumptions.join("\n")).toMatch(/for each 4 ft of wall only\. Add the sheets above 12 ft yourself\./);
+  });
+
   it("escapes what a person typed before it goes into the printed page", () => {
     const html = materialListHtml(buildMaterialList(input({ jobName: "Bob's <b>Diner</b> & Grill" })));
     expect(html).toContain("Bob's &lt;b&gt;Diner&lt;/b&gt; &amp; Grill");

@@ -331,6 +331,12 @@ export interface RoomSuggestion {
 export const LONGEST_SHEET_FT = 12;
 
 /**
+ * Half of a 4x8. A panel no higher than this can come two to a sheet, so the
+ * suggested count (one full sheet per 4 ft of wall) may be about double.
+ */
+export const HALF_SHEET_FT = 4;
+
+/**
  * Suggested sheets for one room: wall length ÷ the 4 ft sheet width, rounded
  * up. The walls are measured straight through doors and windows ("Yes we
  * measure through windows and doors to get our waste"), so NO waste is added
@@ -349,10 +355,17 @@ export function suggestRoom(row: RoomRow): RoomSuggestion {
   }
   // His sizes stop at 4x12. Above that the count below is one sheet per 4 ft
   // of wall only, which is too few: say so rather than let it pass.
+  //
+  // A panel of 4 ft or less (a wainscot) is the other way round: one 4x8 cut
+  // in half covers 8 ft of wall, so the count below may be about twice what
+  // he buys. He has not given his rule for it, so the count is NOT changed
+  // and no rule is invented: the row says so and asks.
   const warning =
     height.feet !== null && height.feet > LONGEST_SHEET_FT
       ? `the panel is ${feetText(height.feet)} high, taller than a ${LONGEST_SHEET_FT} ft sheet: this counts one 4x12 for each 4 ft of wall only`
-      : null;
+      : height.feet !== null && height.feet <= HALF_SHEET_FT
+        ? `the panel is ${feetText(height.feet)} high: this counts one full ${sheetSize} for every ${SHEET_WIDTH_FT} ft of wall, but one 4x8 cut in half covers 8 ft of wall, so the true count may be about half: tell us your rule`
+        : null;
   const sheetUnits = SHEET_WIDTH_FT * UNITS_PER_FOOT;
   const sheets = Math.ceil(wall.units / sheetUnits);
   const noun = sheets === 1 ? "sheet" : "sheets";
