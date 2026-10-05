@@ -3,6 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  PROFIT_FLAT_MAX_SHEETS,
   amountInWords,
   computeCosts,
   flatProfitApplies,
@@ -110,9 +111,29 @@ describe("profit rule", () => {
     expect(computeCosts({ ...base, sheetRows: sheets(9), laborDays: 2 }).autoProfit).toBe(2000);
   });
 
-  it("old rule: exactly 8 sheets is NOT flat", () => {
-    expect(flatProfitApplies(8)).toBe(false);
-    expect(computeCosts({ ...base, sheetRows: sheets(8), laborDays: 2 }).autoProfit).toBe(2000);
+  it("his rule: flat profit is for 8 and under, so exactly 8 sheets is flat", () => {
+    expect(flatProfitApplies(8)).toBe(true);
+    expect(computeCosts({ ...base, sheetRows: sheets(8), laborDays: 2 }).autoProfit).toBe(800);
+    expect(PROFIT_FLAT_MAX_SHEETS).toBe(8);
+  });
+
+  it("the ninth sheet moves the job to $1,000 a labor day", () => {
+    const eight = computeCosts({ ...base, sheetRows: sheets(8), laborDays: 2 });
+    const nine = computeCosts({ ...base, sheetRows: sheets(9), laborDays: 2 });
+    expect(eight.profit).toBe(800);
+    expect(nine.profit).toBe(2000);
+    // one more sheet at $45.50, and $1,200 more profit
+    expect(nine.total - eight.total).toBe(45.5 + 1200);
+  });
+
+  it("counts sheets across every row, whatever the size", () => {
+    const rows: SheetRow[] = [
+      { sheetsNeeded: 5, sheetSize: "4x8", pricePerSheet: 45.5 },
+      { sheetsNeeded: 3, sheetSize: "4x10", pricePerSheet: 58.25 },
+    ];
+    expect(computeCosts({ ...base, sheetRows: rows }).autoProfit).toBe(800);
+    rows[1]!.sheetsNeeded = 4;
+    expect(computeCosts({ ...base, sheetRows: rows }).autoProfit).toBe(1250);
   });
 });
 

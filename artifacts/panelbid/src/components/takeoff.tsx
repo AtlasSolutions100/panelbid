@@ -48,7 +48,7 @@ import {
   HOTEL_NIGHTLY,
   PROFIT_FLAT,
   PROFIT_PER_DAY,
-  PROFIT_SHEET_THRESHOLD,
+  PROFIT_FLAT_MAX_SHEETS,
   computeCosts,
   flatProfitApplies,
   linearFootage,
@@ -849,7 +849,7 @@ export function TakeoffSection({
                         reset to auto ({money(totals.autoProfit)})
                       </button>
                     ) : (
-                      <span>auto: {flatProfitApplies(totals.totalSheets) ? `$${PROFIT_FLAT} flat (< ${PROFIT_SHEET_THRESHOLD} sheets)` : `$${PROFIT_PER_DAY}/day`}</span>
+                      <span>auto: {flatProfitApplies(totals.totalSheets) ? `$${PROFIT_FLAT} flat (${PROFIT_FLAT_MAX_SHEETS} sheets and under)` : `$${PROFIT_PER_DAY}/day (more than ${PROFIT_FLAT_MAX_SHEETS} sheets)`}</span>
                     )}
                   </div>
                 </dt>

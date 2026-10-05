@@ -42,11 +42,12 @@ export const TRAVEL_MULTIPLIER = 8 * 1.5;
 export const HOTEL_NIGHTLY = 375;
 export const PROFIT_FLAT = 800;
 export const PROFIT_PER_DAY = 1000;
-export const PROFIT_SHEET_THRESHOLD = 8;
+/** The client's own words: "Flat profit is for 8 and under." */
+export const PROFIT_FLAT_MAX_SHEETS = 8;
 
-/** True when the job's sheet count gets the flat profit. */
+/** True when the job's sheet count gets the flat profit (8 sheets and under). */
 export function flatProfitApplies(totalSheets: number): boolean {
-  return totalSheets < PROFIT_SHEET_THRESHOLD;
+  return totalSheets <= PROFIT_FLAT_MAX_SHEETS;
 }
 
 // ---------------------------------------------------------------------------
