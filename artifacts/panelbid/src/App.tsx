@@ -6,8 +6,12 @@ import Dashboard from '@/pages/dashboard';
 import JobDetail from '@/pages/job-detail';
 import Settings from '@/pages/settings';
 import { Route, Switch, Router as WouterRouter } from 'wouter';
+import { AuthGate } from '@/auth';
 
 const queryClient = new QueryClient();
+
+// When a session ends, nothing that was loaded stays in the page's memory.
+const dropLoadedData = () => queryClient.clear();
 
 function Router() {
   return (
@@ -24,9 +28,13 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <Router />
-        </WouterRouter>
+        {/* Nothing of the app is drawn, and no data is asked for, until the
+            server says this browser is signed in. */}
+        <AuthGate onSignedOut={dropLoadedData}>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+            <Router />
+          </WouterRouter>
+        </AuthGate>
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>

@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter"
 import { Building2, LayoutDashboard, Settings } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { SignOutButton } from "@/auth"
 
 interface LayoutProps {
   children: React.ReactNode
@@ -45,6 +46,9 @@ export function Layout({ children }: LayoutProps) {
               </span>
             </Link>
           </nav>
+          <div className="ml-auto">
+            <SignOutButton />
+          </div>
         </div>
       </header>
       <main className="flex-1 max-w-[1400px] mx-auto w-full p-4 md:p-8">
