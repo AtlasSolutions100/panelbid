@@ -148,6 +148,7 @@ function SheetCountInput({
   onChange,
   onProblem,
   testId,
+  problemTestId,
   className,
   children,
 }: {
@@ -156,6 +157,8 @@ function SheetCountInput({
   /** Told the reason while this box cannot be read, and null when it can. */
   onProblem: (id: string, reason: string | null) => void
   testId: string
+  /** For the words under the box. Not "input-...": only the box itself is one. */
+  problemTestId: string
   className: string
   /** Shown beside the box (whose count it is). */
   children?: React.ReactNode
@@ -194,7 +197,7 @@ function SheetCountInput({
         {children}
       </div>
       {reason && (
-        <div className="mt-1 max-w-[240px] text-[10px] text-destructive" data-testid={`${testId}-problem`}>
+        <div className="mt-1 max-w-[240px] text-[10px] text-destructive" data-testid={problemTestId}>
           {reason}
         </div>
       )}
@@ -1023,6 +1026,7 @@ export function TakeoffSection({
                       className={`${inputCls} w-24 font-mono`}
                       value={row.sheetsNeeded}
                       testId={`input-sheets-needed-${i}`}
+                      problemTestId={`text-sheet-count-problem-${i}`}
                       onProblem={reportCountProblem}
                       onChange={(count) => updateSheetRow(i, { sheetsNeeded: count, sheetsSource: "typed" })}
                     >
