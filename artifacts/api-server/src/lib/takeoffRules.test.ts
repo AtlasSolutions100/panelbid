@@ -13,6 +13,7 @@ import {
   resolvePricePerSheet,
   roundToCents,
   sameJson,
+  screenMayTakeSavedCopy,
   sheetAreaSqft,
   totalSheets,
   type CostInput,
@@ -183,6 +184,89 @@ describe("unsaved changes", () => {
   it("any changed figure makes them differ", () => {
     expect(sameJson(base, { ...base, laborDays: 2 })).toBe(false);
     expect(sameJson(base, { ...base, sheetRows: sheets(36) })).toBe(false);
+  });
+});
+
+describe("typing while a save is on its way", () => {
+  // A stand-in for the takeoff page: what is on screen (as typed), the copy
+  // the server stored, and a Save whose answer is held back until asked for.
+  type Screen = { wall: string; thickness: string; laborDays: string; sheets: number };
+  function page(start: Screen) {
+    let screen = start;
+    let stored = start;
+    return {
+      type(patch: Partial<Screen>) {
+        screen = { ...screen, ...patch };
+      },
+      pressSave() {
+        const shownWhenSent = screen;
+        return {
+          sent: shownWhenSent,
+          // the server's answer arrives: its own copy of what was sent
+          answerArrives(fromServer: Screen) {
+            if (screenMayTakeSavedCopy(shownWhenSent, screen)) screen = fromServer;
+            stored = fromServer;
+          },
+        };
+      },
+      get screen() {
+        return screen;
+      },
+      get says() {
+        return sameJson(stored, screen) ? "Saved" : "Changes not saved";
+      },
+    };
+  }
+  const start: Screen = { wall: "12 + 12 + 10", thickness: "", laborDays: "2", sheets: 25 };
+
+  it("keeps what was typed after Save was pressed, and does not say Saved over it", () => {
+    // the checker's run: thickness typed, Save pressed, a wall typed while the answer was held 2 s
+    const p = page(start);
+    p.type({ thickness: ".125" });
+    const save = p.pressSave();
+    p.type({ wall: "12 + 12 + 10 + 40", sheets: 35 });
+    save.answerArrives(save.sent);
+    expect(p.screen.wall).toBe("12 + 12 + 10 + 40");
+    expect(p.screen.sheets).toBe(35);
+    expect(p.says).toBe("Changes not saved");
+    // pressing Save again, with nothing typed in between, saves it
+    const second = p.pressSave();
+    second.answerArrives(second.sent);
+    expect(p.screen.wall).toBe("12 + 12 + 10 + 40");
+    expect(p.says).toBe("Saved");
+  });
+
+  it("the plain case is as before: nothing typed in between, the screen takes the server's rows and total", () => {
+    const p = page(start);
+    p.type({ thickness: ".125" });
+    const save = p.pressSave();
+    // the server brings a suggested count up to date before it stores it
+    save.answerArrives({ ...save.sent, sheets: 9 });
+    expect(p.screen).toEqual({ wall: "12 + 12 + 10", thickness: ".125", laborDays: "2", sheets: 9 });
+    expect(p.says).toBe("Saved");
+  });
+
+  it("something typed and put back is not a change", () => {
+    const p = page(start);
+    const save = p.pressSave();
+    p.type({ wall: "12 + 12 + 10 + 4" });
+    p.type({ wall: "12 + 12 + 10" });
+    save.answerArrives({ ...save.sent, sheets: 9 });
+    expect(p.screen.sheets).toBe(9);
+  });
+
+  it("a number still being typed (2 then 2.) is typing: the box is not put back to 2", () => {
+    const p = page(start);
+    const save = p.pressSave();
+    p.type({ laborDays: "2." });
+    save.answerArrives(save.sent);
+    expect(p.screen.laborDays).toBe("2.");
+  });
+
+  it("compares what the screen shows, not the order of the keys", () => {
+    expect(screenMayTakeSavedCopy({ a: "1", rows: [{ n: 1, s: "4x8" }] }, { rows: [{ s: "4x8", n: 1 }], a: "1" })).toBe(true);
+    expect(screenMayTakeSavedCopy({ a: "1" }, { a: "1 " })).toBe(false);
+    expect(screenMayTakeSavedCopy({ rows: [1, 2] }, { rows: [1, 2, 3] })).toBe(false);
   });
 });
 

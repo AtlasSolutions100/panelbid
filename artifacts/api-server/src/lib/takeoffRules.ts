@@ -787,6 +787,17 @@ export function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 }
 
+/**
+ * When the answer to a Save comes back: may the screen be replaced by the
+ * server's copy? Only when it still shows exactly what it showed when Save
+ * was pressed. If the person has typed since (a slow line, a cold start),
+ * the screen is left alone: their typing stays, the page remembers what the
+ * server stored, and so it reads "Changes not saved" instead of "Saved".
+ */
+export function screenMayTakeSavedCopy(shownWhenSent: unknown, shownNow: unknown): boolean {
+  return sameJson(shownWhenSent, shownNow);
+}
+
 const ONES = [
   "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
   "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen",

@@ -62,6 +62,7 @@ import {
   tidyMoldingCounts,
   resolvePricePerSheet,
   sameJson,
+  screenMayTakeSavedCopy,
   sheetAreaSqft,
   suggestSheets,
 } from "@/lib/takeoff-rules"
@@ -367,6 +368,25 @@ export function TakeoffSection({
     [roomRows, sheetRows, priceSheetFileId, laborRate, laborDays, laborHoursPerDay, travelMiles, hotelNights, freight, typedProfit, thickness],
   )
 
+  // Everything typed on the sheet, exactly as it is on screen (text boxes as
+  // their text). Kept in a ref so that the answer to a save, which arrives
+  // later, can tell whether anything was typed since Save was pressed.
+  const onScreen = {
+    roomRows,
+    sheetRows,
+    priceSheetFileId,
+    laborRate,
+    laborDays,
+    laborHoursPerDay,
+    travelMiles,
+    hotelNights,
+    freight,
+    thickness,
+    profitOverride,
+  }
+  const onScreenRef = useRef(onScreen)
+  onScreenRef.current = onScreen
+
   // The proposal is only ever made from a saved takeoff, so the page has to
   // know when the screen and the saved copy differ.
   const loaded = !!takeoff && loadedFor.current === jobId
@@ -451,6 +471,8 @@ export function TakeoffSection({
     )
 
   const handleSave = () => {
+    // Exactly what is on screen at the moment Save is pressed.
+    const shownWhenSent = onScreenRef.current
     saveTakeoff.mutate(
       {
         jobId,
@@ -460,10 +482,25 @@ export function TakeoffSection({
       {
         onSuccess: (saved) => {
           queryClient.setQueryData(getGetTakeoffQueryKey(jobId), saved)
-          showTakeoff(saved)
+          // The screen takes the server's copy only if it still shows exactly
+          // what was sent. If something was typed while the save was on its
+          // way, that typing stays on screen: only the saved copy is
+          // remembered, so the page reads "Changes not saved", not "Saved".
+          const typedSince = !screenMayTakeSavedCopy(shownWhenSent, onScreenRef.current)
+          if (typedSince) setSavedData(dataFromTakeoff(saved))
+          else showTakeoff(saved)
           queryClient.invalidateQueries({ queryKey: getGetJobQueryKey(jobId) })
           queryClient.invalidateQueries({ queryKey: getListJobsQueryKey() })
           queryClient.invalidateQueries({ queryKey: getGetJobsSummaryQueryKey() })
+          if (typedSince) {
+            toast({
+              title: "What you typed since is not saved yet",
+              description:
+                "The takeoff was saved as it was when you pressed Save. What you typed after that is still on screen and is NOT saved: press Save Takeoff again.",
+              variant: "destructive",
+            })
+            return
+          }
           toast({
             title: "Takeoff saved",
             description:
