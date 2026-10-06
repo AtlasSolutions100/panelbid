@@ -301,11 +301,55 @@ describe("no negative money or quantity is stored", () => {
     expect(saved.status).toBe(200);
     expect(saved.json?.totalPrice).toBe(0);
     // a proposal whose price box was emptied is saved with no price and no words
-    await send("POST", "/proposal/generate");
+    // Repair 3: this takeoff's rows are not what its walls need, so the
+    // proposal needs his confirmation (not what this test is about).
+    await send("POST", "/proposal/generate", { confirmCounts: true });
     await send("PATCH", "/proposal", { priceAmount: 4100 });
     const emptied = await send("PATCH", "/proposal", { priceAmount: 0 });
     expect(emptied.status).toBe(200);
     expect(emptied.json?.priceAmount).toBe(0);
     expect(emptied.json?.priceInWords).toBe("");
+  });
+});
+
+describe("repair 3: suggested rows follow the walls, and a proposal asks before printing other counts", () => {
+  it("a stale suggested row beside his typed row is brought up to the walls on save (BLOCKER-3)", async () => {
+    const reply = await send(
+      "PUT",
+      "/takeoff",
+      takeoff({
+        sheetRows: [
+          { sheetsNeeded: 3, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "suggested", rules: 3 },
+          { sheetsNeeded: 6, sheetSize: "4x10", pricePerSheet: 58.25, sheetsSource: "typed" },
+        ],
+      }),
+    );
+    expect(reply.status).toBe(200);
+    const rows = memory.takeoff?.sheetRows as Row[];
+    expect(rows[0]).toMatchObject({ sheetsNeeded: 9, sheetsSource: "suggested" });
+    expect(rows[1]).toEqual({ sheetsNeeded: 6, sheetSize: "4x10", pricePerSheet: 58.25, sheetsSource: "typed" });
+  });
+
+  it("rows that differ from the walls: refused in words until he confirms, for that request only (MAJOR-R3)", async () => {
+    const extra = { sheetsNeeded: 12, sheetSize: "4x12", pricePerSheet: 50, sheetsSource: "typed" };
+    await send("PUT", "/takeoff", takeoff({ sheetRows: [...(takeoff().sheetRows as Row[]), extra] }));
+    const refused = await send("POST", "/proposal/generate");
+    expect(refused.status).toBe(409);
+    expect(refused.json?.code).toBe("counts_differ");
+    expect(refused.json?.differences).toEqual(["4x12: the walls need 0, your rows hold 12"]);
+    expect(memory.proposal).toBeNull();
+
+    const made = await send("POST", "/proposal/generate", { confirmCounts: true });
+    expect(made.status).toBe(200);
+    expect(made.json?.frp).toContain("An allotment of 9 4x8, 6 4x10 and 12 4x12 sheets only.");
+
+    const again = await send("POST", "/proposal/generate");
+    expect(again.status).toBe(409); // the confirmation is not remembered
+  });
+
+  it("rows that match the walls generate with no extra step", async () => {
+    await send("PUT", "/takeoff", takeoff());
+    const made = await send("POST", "/proposal/generate");
+    expect(made.status).toBe(200);
   });
 });
