@@ -16,6 +16,7 @@ export * from './errorResponse';
 export * from './exclusionMatchType';
 export * from './exclusionTerm';
 export * from './extractionConfidence';
+export * from './generateProposalInput';
 export * from './gmailDisconnectResult';
 export * from './gmailPollResult';
 export * from './gmailStatus';

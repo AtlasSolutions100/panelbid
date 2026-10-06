@@ -9,7 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:rules": "vitest run src/lib/takeoffRules.test.ts src/lib/proposalRules.test.ts src/lib/takeoffSuggest.test.ts src/lib/takeoffMaterials.test.ts src/lib/materialList.test.ts src/lib/takeoffUpdate2.test.ts src/lib/takeoffRepair1.test.ts src/lib/takeoffRepair2.test.ts"
+    "test:rules": "vitest run src/lib/takeoffRules.test.ts src/lib/proposalRules.test.ts src/lib/takeoffSuggest.test.ts src/lib/takeoffMaterials.test.ts src/lib/materialList.test.ts src/lib/takeoffUpdate2.test.ts src/lib/takeoffRepair1.test.ts src/lib/takeoffRepair2.test.ts src/lib/takeoffRepair3.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

@@ -292,14 +292,17 @@ describe("suggested sheet rows for the job", () => {
     ]);
   });
 
-  // Repair 2 (critic round 2, BLOCKER-2): this test used to have a typed 4x10
-  // row beside the stale suggested one, and the suggested one was refreshed.
-  // With a typed row in the job nothing moves by itself now.
-  it("beside a row he typed, the server moves nothing", () => {
+  // Repair 3 (critic round 3, BLOCKER-3): repair 2 froze this case; the
+  // suggested row follows the walls again beside his typed row, which is
+  // never changed (as update 1 had it).
+  it("beside a row he typed, the server refreshes the suggested row and leaves his", () => {
     const withTyped: SheetRow[] = [
       { sheetsNeeded: 3, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
       { sheetsNeeded: 7, sheetSize: "4x10", pricePerSheet: 50, sheetsSource: "typed" },
     ];
-    expect(refreshSuggestedRows(rooms, withTyped)).toEqual(withTyped);
+    expect(refreshSuggestedRows(rooms, withTyped)).toEqual([
+      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
+      { sheetsNeeded: 7, sheetSize: "4x10", pricePerSheet: 50, sheetsSource: "typed" },
+    ]);
   });
 });

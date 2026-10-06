@@ -15,6 +15,7 @@ import {
   UpdateProposalBody,
   UpdateProposalResponse,
   GenerateProposalParams,
+  GenerateProposalBody,
   GenerateProposalResponse,
 } from "@workspace/api-zod";
 import {
@@ -24,6 +25,8 @@ import {
 } from "../lib/proposalRules";
 import {
   amountInWords,
+  countDifferenceWords,
+  countDifferences,
   refreshSuggestedRows,
   roundToCents,
 } from "../lib/takeoffRules";
@@ -107,6 +110,21 @@ router.post(
       res.status(409).json({
         message:
           "The saved takeoff has no sheets. Type the wall lengths or the sheet counts, save the takeoff, then make the proposal.",
+      });
+      return;
+    }
+
+    // Repair 3: sizes whose rows hold more or fewer sheets than the walls need
+    // are listed, and nothing is printed until he confirms, for this request
+    // only (a direct call cannot skip it either).
+    const body = GenerateProposalBody.safeParse(req.body ?? {});
+    const confirmed = body.success && body.data.confirmCounts === true;
+    const differences = countDifferenceWords(countDifferences(takeoff.roomRows, takeoff.sheetRows));
+    if (differences.length > 0 && !confirmed) {
+      res.status(409).json({
+        code: "counts_differ",
+        message: `The sheet rows do not match what the walls need: ${differences.join("; ")}. Check the takeoff, or confirm to make the proposal with the rows as they are.`,
+        differences,
       });
       return;
     }

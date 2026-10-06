@@ -27,6 +27,7 @@ import type {
   CreateKeywordInput,
   ErrorResponse,
   ExclusionTerm,
+  GenerateProposalInput,
   GmailDisconnectResult,
   GmailPollResult,
   GmailStatus,
@@ -1642,14 +1643,15 @@ export const getGenerateProposalUrl = (jobId: number,) => {
 /**
  * @summary Generate (or regenerate) the proposal from the job's current takeoff
  */
-export const generateProposal = async (jobId: number, options?: RequestInit): Promise<Proposal> => {
+export const generateProposal = async (jobId: number,
+    generateProposalInput?: GenerateProposalInput, options?: RequestInit): Promise<Proposal> => {
 
   return customFetch<Proposal>(getGenerateProposalUrl(jobId),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(generateProposalInput)
   }
 );}
 
@@ -1658,8 +1660,8 @@ export const generateProposal = async (jobId: number, options?: RequestInit): Pr
 
 
 export const getGenerateProposalMutationOptions = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateProposal>>, TError,{jobId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof generateProposal>>, TError,{jobId: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateProposal>>, TError,{jobId: number;data?: BodyType<GenerateProposalInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateProposal>>, TError,{jobId: number;data?: BodyType<GenerateProposalInput>}, TContext> => {
 
 const mutationKey = ['generateProposal'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -1671,10 +1673,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateProposal>>, {jobId: number}> = (props) => {
-          const {jobId} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateProposal>>, {jobId: number;data?: BodyType<GenerateProposalInput>}> = (props) => {
+          const {jobId,data} = props ?? {};
 
-          return  generateProposal(jobId,requestOptions)
+          return  generateProposal(jobId,data,requestOptions)
         }
 
 
@@ -1685,18 +1687,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type GenerateProposalMutationResult = NonNullable<Awaited<ReturnType<typeof generateProposal>>>
-
+    export type GenerateProposalMutationBody = BodyType<GenerateProposalInput> | undefined
     export type GenerateProposalMutationError = ErrorType<ErrorResponse>
 
     /**
  * @summary Generate (or regenerate) the proposal from the job's current takeoff
  */
 export const useGenerateProposal = <TError = ErrorType<ErrorResponse>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateProposal>>, TError,{jobId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateProposal>>, TError,{jobId: number;data?: BodyType<GenerateProposalInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof generateProposal>>,
         TError,
-        {jobId: number},
+        {jobId: number;data?: BodyType<GenerateProposalInput>},
         TContext
       > => {
       return useMutation(getGenerateProposalMutationOptions(options));

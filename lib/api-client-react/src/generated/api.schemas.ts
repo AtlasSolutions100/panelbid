@@ -90,6 +90,11 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface GenerateProposalInput {
+  /** He has seen the sizes whose rows hold more or fewer sheets than the walls need, and makes the proposal anyway. For this one request only */
+  confirmCounts?: boolean;
+}
+
 export interface ErrorResponse {
   message: string;
 }

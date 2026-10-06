@@ -601,6 +601,10 @@ export const GenerateProposalParams = zod.object({
   "jobId": zod.coerce.number()
 })
 
+export const GenerateProposalBody = zod.object({
+  "confirmCounts": zod.boolean().optional().describe('He has seen the sizes whose rows hold more or fewer sheets than the walls need, and makes the proposal anyway. For this one request only')
+})
+
 export const GenerateProposalResponse = zod.object({
   "id": zod.number(),
   "jobId": zod.number(),

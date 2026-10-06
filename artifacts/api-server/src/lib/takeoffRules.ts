@@ -886,10 +886,9 @@ export function suggestedEarlier(row: SheetRow): boolean {
  * never stored or printed.
  */
 export function refreshSuggestedRows(roomRows: RoomRow[], sheetRows: SheetRow[]): SheetRow[] {
-  // A job holding a row he typed: nothing is moved by itself (repair 2). His
-  // typed row may cover rooms that a suggested row also counts, and the app
-  // cannot tell which; the page shows what the walls need instead.
-  if (jobHasTypedRow(sheetRows)) return sheetRows;
+  // Repair 3: a suggested row always follows the walls, whatever other rows
+  // are typed (critic round 3, BLOCKER-3). Typed rows and earlier-rules rows
+  // are never changed here.
   const bySize = suggestSheets(roomRows).bySize;
   const given = new Set<SheetSize>();
   return sheetRows.map((row) => {
@@ -924,9 +923,11 @@ export function applySuggestions(
   // until he converts every size at once (convertToNewRules). Adding a new
   // suggested row now would count a room twice (critic, BLOCKER-1).
   if (jobUnderEarlierRules(sheetRows)) return refreshSuggestedRows(nextRooms, sheetRows);
-  // A job holding a row he typed: no row is added or moved by itself
-  // (critic round 2, BLOCKER-2). See wallNeeds and addSuggestedSize.
-  if (jobHasTypedRow(sheetRows)) return sheetRows;
+  // A job holding a row he typed: no row of a NEW size is added by itself
+  // (critic round 2, BLOCKER-2); his typed row may cover those walls. Its
+  // suggested rows still follow the walls (repair 3). Adding a size is his
+  // click (wallNeeds, addSuggestedSize).
+  if (jobHasTypedRow(sheetRows)) return refreshSuggestedRows(nextRooms, sheetRows);
   const before = suggestSheets(prevRooms).bySize;
   const after = suggestSheets(nextRooms).bySize;
   const rows = [...sheetRows];
@@ -1009,6 +1010,32 @@ export function addSuggestedSize(roomRows: RoomRow[], sheetRows: SheetRow[], siz
   if (bigger === -1) rows.push(row);
   else rows.splice(bigger, 0, row);
   return rows;
+}
+
+export interface CountDifference {
+  size: SheetSize;
+  /** What the walls need under the rules. */
+  need: number;
+  /** What the sheet rows of this size hold. */
+  have: number;
+}
+
+/**
+ * Sizes whose rows hold more or fewer sheets than the walls need under the
+ * rules. Before a proposal is made the page lists them and he confirms; the
+ * server refuses a proposal without that confirmation while any is listed.
+ */
+export function countDifferences(roomRows: RoomRow[], sheetRows: SheetRow[]): CountDifference[] {
+  const need = suggestSheets(roomRows).bySize;
+  return SHEET_SIZES.flatMap((size) => {
+    const have = sheetRows.filter((r) => r.sheetSize === size).reduce((sum, r) => sum + r.sheetsNeeded, 0);
+    return have === need[size] ? [] : [{ size, need: need[size], have }];
+  });
+}
+
+/** "4x12: the walls need 0, your rows hold 12". */
+export function countDifferenceWords(diffs: CountDifference[]): string[] {
+  return diffs.map((d) => `${d.size}: the walls need ${d.need}, your rows hold ${d.have}`);
 }
 
 /** True when any sheet row was suggested under the earlier rules. */

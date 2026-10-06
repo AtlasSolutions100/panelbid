@@ -435,6 +435,12 @@ paths:
       summary: Generate (or regenerate) the proposal from the job's current takeoff
       parameters:
         - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateProposalInput"
       responses:
         "200":
           description: The generated proposal
@@ -449,7 +455,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: No saved takeoff to generate from
+          description: No saved takeoff to generate from, or the sheet rows differ from what the walls need and confirmCounts was not sent (code counts_differ, with the sizes in words)
           content:
             application/json:
               schema:
@@ -1047,6 +1053,12 @@ components:
           type: string
       required:
         - status
+    GenerateProposalInput:
+      type: object
+      properties:
+        confirmCounts:
+          type: boolean
+          description: He has seen the sizes whose rows hold more or fewer sheets than the walls need, and makes the proposal anyway. For this one request only
     ErrorResponse:
       type: object
       properties:
