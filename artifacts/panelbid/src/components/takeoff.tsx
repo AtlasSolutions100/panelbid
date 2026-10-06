@@ -52,6 +52,9 @@ import {
   PROFIT_FLAT_MAX_SHEETS,
   CURRENT_RULES,
   MOLDING_KIND_NAMES,
+  addSuggestedSize,
+  jobHasTypedRow,
+  wallNeeds,
   MOLDING_PER_SHEET_ASSUMED,
   applySuggestions,
   buildMaterialList,
@@ -613,6 +616,14 @@ export function TakeoffSection({
   // every size at once; this is what that would change.
   const earlierRules = jobUnderEarlierRules(sheetRows)
   const conversion = useMemo(() => convertToNewRules(roomRows, sheetRows), [roomRows, sheetRows])
+  // A job where he typed his own counts: nothing is added or moved by itself;
+  // what the walls need is shown beside his rows, with "add N x size".
+  const typedJob = !earlierRules && jobHasTypedRow(sheetRows)
+  const needs = useMemo(() => wallNeeds(roomRows, sheetRows), [roomRows, sheetRows])
+  const typedRowsWords = sheetRows
+    .filter((r) => r.sheetsSource !== "suggested" && r.sheetsNeeded > 0)
+    .map((r) => `${r.sheetsNeeded} x ${r.sheetSize}`)
+    .join(", ")
 
   // Moldings by kind and length (his rule) and glue buckets (his rule), with their working.
   const molding = useMemo(() => moldingsByKind(roomRows, sheetRows), [roomRows, sheetRows])
@@ -1150,6 +1161,37 @@ export function TakeoffSection({
             </div>
           </div>
         )}
+        {typedJob && (
+          <div className="mx-4 mb-2 rounded-md border border-amber-400 bg-amber-50/70 p-3 text-xs" data-testid="box-typed-job">
+            <p className="font-medium text-amber-900">
+              You typed your own count ({typedRowsWords}). While you have typed counts, no row is added or changed by itself: the app cannot tell which rooms your typed rows cover.
+            </p>
+            <p className="mt-1 text-amber-900">Under the rules, the walls need:</p>
+            <ul className="mt-1 space-y-1">
+              {needs.map((n) => (
+                <li key={n.size} className="flex flex-wrap items-center gap-2" data-testid={`row-wall-need-${n.size}`}>
+                  <span className="font-mono">
+                    {n.size}: {n.need} (the rows hold {n.have}{n.typed > 0 ? `, ${n.typed} typed by you` : ""})
+                  </span>
+                  {n.canAdd && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-[11px]"
+                      onClick={() => setSheetRows((rows) => tidyMoldingCounts(addSuggestedSize(roomRows, rows, n.size)))}
+                      data-testid={`button-add-size-${n.size}`}
+                    >
+                      add {n.need} x {n.size}
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-amber-900">
+              Your typed rows stay as they are and may cover the same walls: check them before you add a row.
+            </p>
+          </div>
+        )}
         {earlierRules && (
           <div className="mx-4 mb-2 rounded-md border border-amber-400 bg-amber-50/70 p-3 text-xs" data-testid="box-earlier-rules">
             <p className="font-medium text-amber-900">
@@ -1160,6 +1202,9 @@ export function TakeoffSection({
                 ? `The new rules would change: ${conversion.changes.map((c) => `${c.size} ${c.before} → ${c.after}`).join("; ")}. Rows you typed stay yours.`
                 : "The new rules give the same counts. Rows you typed stay yours."}
             </p>
+            {conversion.typedKept.map((t) => (
+              <p key={t} className="mt-1 font-medium text-amber-900" data-testid="text-typed-kept">{t}</p>
+            ))}
             <Button
               variant="outline"
               size="sm"
