@@ -26,6 +26,13 @@ export interface TakeoffRoomRowJson {
   // Ceiling height, used (and marked "assumed to ceiling") when the room has
   // no panel height. Absent on rows saved before update 1.
   ceilingHeight?: string | null;
+  // Update 2 (all optional, absent on older rows): corner pieces typed from
+  // the plans, the "4x4 panel" tick, and the typed courses of a wall taller
+  // than 12 ft.
+  insideCorners?: number | null;
+  outsideCorners?: number | null;
+  fourByFour?: boolean | null;
+  stackCourses?: string | null;
 }
 
 export interface TakeoffSheetRowJson {
@@ -38,6 +45,10 @@ export interface TakeoffSheetRowJson {
   sheetsSource?: "suggested" | "typed";
   // Typed molding count for this row's molding length; null/absent = not typed.
   moldingCount?: number | null;
+  // Update 2 (optional): the rules a suggested row was made under (absent:
+  // made earlier, keeps its saved count), and molding counts typed by kind.
+  rules?: number;
+  moldingCounts?: Record<string, number> | null;
 }
 
 export const takeoffsTable = pgTable("takeoffs", {
