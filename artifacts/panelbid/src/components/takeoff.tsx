@@ -50,18 +50,25 @@ import {
   PROFIT_FLAT,
   PROFIT_PER_DAY,
   PROFIT_FLAT_MAX_SHEETS,
+  CURRENT_RULES,
+  MOLDING_KIND_NAMES,
+  MOLDING_PER_SHEET_ASSUMED,
   applySuggestions,
   buildMaterialList,
   checkTakeoffNumbers,
   computeCosts,
   flatProfitApplies,
+  followsWalls,
   glueBuckets,
-  isSuggested,
-  moldingLines,
+  moldingsByKind,
   readSheetCount,
   refreshSuggestedRows,
+  roomSheetsText,
+  setKindCount,
   setMoldingCount,
+  suggestedEarlier,
   tidyMoldingCounts,
+  wallRoundingWords,
   resolvePricePerSheet,
   sameJson,
   screenMayTakeSavedCopy,
@@ -201,6 +208,63 @@ function SheetCountInput({
           {reason}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * A whole number of 0 or more that may be left empty (empty = not typed).
+ * Used for corner pieces and molding counts. Anything else is said in words
+ * under the box and Save stays off, as for sheet counts.
+ */
+function CountBox({
+  value,
+  onChange,
+  onProblem,
+  testId,
+  placeholder,
+  className,
+  title,
+}: {
+  value: number | null
+  onChange: (count: number | null) => void
+  onProblem: (id: string, reason: string | null) => void
+  testId: string
+  placeholder?: string
+  className: string
+  title?: string
+}) {
+  const id = useId()
+  const shownValue = value === null ? "" : String(value)
+  const [text, setText] = useState(shownValue)
+  useEffect(() => {
+    setText((t) => (t.trim() === shownValue ? t : shownValue))
+  }, [shownValue])
+  const typed = text.trim()
+  const reason =
+    typed === "" || /^\d+$/.test(typed) ? null : `Can't use "${typed}": type a whole number of 0 or more, or leave it empty.`
+  useEffect(() => {
+    onProblem(id, reason)
+    return () => onProblem(id, null)
+  }, [id, reason, onProblem])
+  return (
+    <div>
+      <Input
+        type="text"
+        inputMode="numeric"
+        className={`${className} ${reason ? "border-destructive" : ""}`}
+        value={text}
+        placeholder={placeholder}
+        title={title}
+        data-testid={testId}
+        onChange={(e) => {
+          setText(e.target.value)
+          const t = e.target.value.trim()
+          if (t === "") onChange(null)
+          else if (/^\d+$/.test(t)) onChange(Number(t))
+        }}
+      />
+      {reason && <div className="mt-1 max-w-[160px] text-[10px] text-destructive">{reason}</div>}
     </div>
   )
 }
@@ -486,7 +550,7 @@ export function TakeoffSection({
     () => [
       ...checkTakeoffNumbers(currentData),
       ...(Object.keys(countProblems).length > 0
-        ? ["A sheet count cannot be read: see the words under its box."]
+        ? ["A count cannot be read: see the words under its box."]
         : []),
     ],
     [currentData, countProblems],
@@ -532,13 +596,20 @@ export function TakeoffSection({
           if (idx !== i) return r
           // A row that moves to another sheet size takes that size's molding count.
           const moved = patch.sheetSize !== undefined && patch.sheetSize !== r.sheetSize
-          return { ...r, ...patch, ...(moved ? { moldingCount: null } : {}) }
+          const next = { ...r, ...patch, ...(moved ? { moldingCount: null } : {}) }
+          // A row he types is his: it carries no rules mark.
+          if (next.sheetsSource === "typed" && "rules" in next) {
+            const { rules: _mark, ...mine } = next
+            return mine
+          }
+          return next
         }),
       ),
     )
 
-  // Moldings by length (his rule) and glue buckets (his rule), with their working.
-  const moldings = useMemo(() => moldingLines(sheetRows), [sheetRows])
+  // Moldings by kind and length (his rule) and glue buckets (his rule), with their working.
+  const molding = useMemo(() => moldingsByKind(roomRows, sheetRows), [roomRows, sheetRows])
+  const legacyLengths = new Set(molding.legacy.map((l) => l.lengthFt))
 
   // The Material list: the same quantities as a sheet to print or send.
   const [materialListOpen, setMaterialListOpen] = useState(false)
@@ -719,7 +790,10 @@ export function TakeoffSection({
           <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Room Measurements</h3>
           <p className="text-xs text-muted-foreground mt-1" data-testid="text-measure-rule">
             Type each wall straight through doors and windows: that is the waste, so no extra waste is added and no opening is taken out.
-            Lengths can be feet (8.5) or feet and inches (8'-6"). Suggested sheets = wall length ÷ 4 ft, rounded up.
+            Lengths can be feet (8.5) or feet and inches (8'-6"). Suggested sheets = counted wall ÷ what one sheet covers (4 ft upright; 8 ft for a 4x8 on its side when the panel is 4 ft tall or less; 4 ft for a 4x4 panel), added per size and rounded up once at the end.
+          </p>
+          <p className="text-xs mt-1 text-amber-700" data-testid="text-rounding-rule">
+            {wallRoundingWords()}
           </p>
         </div>
         <div className="overflow-x-auto">
@@ -731,6 +805,7 @@ export function TakeoffSection({
                 <th className="p-3">Wall Lengths (ft)</th>
                 <th className="p-3">Panel Height</th>
                 <th className="p-3">Suggested Sheets</th>
+                <th className="p-3">Corners</th>
                 <th className="p-3">Manufacturer</th>
                 <th className="p-3">Color</th>
                 <th className="p-3">Product</th>
@@ -742,7 +817,7 @@ export function TakeoffSection({
             <tbody className="divide-y divide-border/40">
               {roomRows.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="p-6 text-center text-muted-foreground text-sm">
+                  <td colSpan={12} className="p-6 text-center text-muted-foreground text-sm">
                     No rooms yet. Rooms are pre-populated from confirmed Room Specs, or add rows manually.
                   </td>
                 </tr>
@@ -765,6 +840,11 @@ export function TakeoffSection({
                     <div className="mt-1 font-mono text-[11px] text-muted-foreground" data-testid={`text-lf-${i}`}>
                       {rs && rs.wall.units > 0 ? `${Number(rs.wall.feet.toFixed(2))} LF` : "—"}
                     </div>
+                    {rs && rs.wall.ok && rs.wallWorking && rs.walls.some((w) => w.countedFt !== w.typedFt) && (
+                      <div className="text-[10px] text-muted-foreground max-w-[190px]" data-testid={`text-wall-working-${i}`}>
+                        counted: {rs.wallWorking}
+                      </div>
+                    )}
                     {rs && !rs.wall.ok && (
                       <div className="text-[10px] text-destructive max-w-[150px]" data-testid={`text-lf-unread-${i}`}>
                         can't read "{rs.wall.unread[0]}"
@@ -789,21 +869,77 @@ export function TakeoffSection({
                         {rs.height.note}
                       </div>
                     )}
+                    <label className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground whitespace-nowrap" title="The product comes as a 4x4 panel">
+                      <input
+                        type="checkbox"
+                        checked={rs?.fourByFour.on ?? false}
+                        data-testid={`checkbox-4x4-${i}`}
+                        onChange={(e) => updateRoomRow(i, { fourByFour: e.target.checked })}
+                      />
+                      4x4 panel
+                      {rs?.fourByFour.source === "product" && <span className="text-amber-700 font-medium">(by product: assumed)</span>}
+                    </label>
                   </td>
-                  <td className="p-2 text-xs min-w-[140px] max-w-[200px]" data-testid={`text-room-suggestion-${i}`}>
+                  <td className="p-2 text-xs min-w-[170px] max-w-[240px]" data-testid={`text-room-suggestion-${i}`}>
                     {rs && rs.sheets !== null ? (
                       <>
-                        <div className="font-mono font-medium">{rs.sheets} × {rs.sheetSize}</div>
+                        <div className="font-mono font-medium">{roomSheetsText(rs.parts)}</div>
                         <div className="text-[10px] text-muted-foreground">{rs.arithmetic}</div>
-                        {rs.warning && (
-                          <div className="mt-0.5 text-[10px] font-medium text-amber-700" data-testid={`text-room-warning-${i}`}>
-                            {rs.warning}
-                          </div>
+                        {rs.parts.some((p) => p.sheets % 1 !== 0) && (
+                          <div className="text-[10px] text-muted-foreground">rounded up with the job's other sheets of that size</div>
                         )}
+                        {rs.assumed.map((a) => (
+                          <div key={a} className="mt-0.5 text-[10px] font-medium text-amber-700" data-testid={`text-room-assumed-${i}`}>{a}</div>
+                        ))}
                       </>
                     ) : (
-                      <span className="text-[10px] text-muted-foreground">{rs?.problem ?? "—"}</span>
+                      <span className="text-[10px] text-muted-foreground" data-testid={`text-room-problem-${i}`}>{rs?.problem ?? "—"}</span>
                     )}
+                    {rs && rs.height.feet !== null && rs.height.feet > 12 && (
+                      <div className="mt-1 rounded border border-amber-300 bg-amber-50/60 p-1.5" data-testid={`box-stack-${i}`}>
+                        <div className="text-[10px] font-medium text-amber-800">Stacked wall ({Number(rs.height.feet.toFixed(2))} ft)</div>
+                        {rs.stack && (
+                          <>
+                            <div className="text-[10px]" data-testid={`text-stack-${i}`}>{rs.stack.text}</div>
+                            <div className="text-[10px] font-medium text-amber-700" data-testid={`text-stack-note-${i}`}>{rs.stack.note}</div>
+                          </>
+                        )}
+                        <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                          courses (ft, from the floor)
+                          <Input
+                            className="h-6 w-24 text-[11px] font-mono"
+                            value={row.stackCourses ?? ""}
+                            placeholder={rs.stack ? rs.stack.courses.join(" + ") : "e.g. 10 + 4"}
+                            data-testid={`input-stack-courses-${i}`}
+                            onChange={(e) => updateRoomRow(i, { stackCourses: e.target.value.trim() === "" ? null : e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </td>
+                  <td className="p-2">
+                    <div className="flex flex-col gap-1 text-[10px] text-muted-foreground">
+                      <span>inside</span>
+                      <CountBox
+                        className={`${inputCls} w-14 font-mono`}
+                        value={row.insideCorners ?? null}
+                        placeholder="—"
+                        title="Inside corner pieces, counted from the plans"
+                        testId={`input-inside-corners-${i}`}
+                        onProblem={reportCountProblem}
+                        onChange={(n) => updateRoomRow(i, { insideCorners: n })}
+                      />
+                      <span>outside</span>
+                      <CountBox
+                        className={`${inputCls} w-14 font-mono`}
+                        value={row.outsideCorners ?? null}
+                        placeholder="—"
+                        title="Outside corner pieces, counted from the plans"
+                        testId={`input-outside-corners-${i}`}
+                        onProblem={reportCountProblem}
+                        onChange={(n) => updateRoomRow(i, { outsideCorners: n })}
+                      />
+                    </div>
                   </td>
                   <td className="p-2">
                     <Input className={`${inputCls} min-w-[100px]`} value={row.manufacturer ?? ""} placeholder="—"
@@ -1030,22 +1166,31 @@ export function TakeoffSection({
                       onProblem={reportCountProblem}
                       onChange={(count) => updateSheetRow(i, { sheetsNeeded: count, sheetsSource: "typed" })}
                     >
-                      {isSuggested(row) ? (
+                      {followsWalls(row) ? (
                         <Badge variant="secondary" className="text-[10px]" data-testid={`badge-sheets-source-${i}`}>suggested</Badge>
+                      ) : suggestedEarlier(row) ? (
+                        <Badge variant="outline" className="text-[10px] border-amber-500 text-amber-700" data-testid={`badge-sheets-source-${i}`}>suggested (earlier rules)</Badge>
                       ) : (
                         <Badge variant="outline" className="text-[10px] border-primary/50" data-testid={`badge-sheets-source-${i}`}>yours</Badge>
                       )}
                     </SheetCountInput>
-                    {!isSuggested(row) &&
+                    {suggestedEarlier(row) && (
+                      <div className="mt-1 max-w-[260px] text-[10px] text-amber-700" data-testid={`text-earlier-rules-${i}`}>
+                        {suggestion.bySize[row.sheetSize] !== row.sheetsNeeded
+                          ? `Saved under the earlier rules. The new rules suggest ${suggestion.bySize[row.sheetSize]}.`
+                          : "Saved under the earlier rules; the new rules give the same."}
+                      </div>
+                    )}
+                    {!followsWalls(row) &&
                       suggestion.bySize[row.sheetSize] > 0 &&
-                      !sheetRows.some((r) => isSuggested(r) && r.sheetSize === row.sheetSize) && (
+                      !sheetRows.some((r) => followsWalls(r) && r.sheetSize === row.sheetSize) && (
                         <button
                           type="button"
-                          className="mt-1 text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
-                          onClick={() => updateSheetRow(i, { sheetsNeeded: suggestion.bySize[row.sheetSize], sheetsSource: "suggested" })}
+                          className="mt-1 block text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+                          onClick={() => updateSheetRow(i, { sheetsNeeded: suggestion.bySize[row.sheetSize], sheetsSource: "suggested", rules: CURRENT_RULES })}
                           data-testid={`button-use-suggestion-${i}`}
                         >
-                          wall lengths suggest {suggestion.bySize[row.sheetSize]}: use that
+                          {suggestedEarlier(row) ? "use the new count" : `wall lengths suggest ${suggestion.bySize[row.sheetSize]}: use that`}
                         </button>
                       )}
                   </td>
@@ -1107,6 +1252,12 @@ export function TakeoffSection({
             </tbody>
           </table>
         </div>
+        {Object.keys(suggestion.sizeWorking).length > 0 && (
+          <p className="px-4 pt-2 text-[11px] text-muted-foreground" data-testid="text-size-working">
+            Suggested from the walls, rounded up once per size:{" "}
+            {Object.values(suggestion.sizeWorking).join("; ")}.
+          </p>
+        )}
         <div className="border-t border-border/40 p-3">
           <Button variant="ghost" size="sm" onClick={addSheetRow} className="text-xs font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground" data-testid="button-add-sheet-row">
             <Plus className="mr-2 h-4 w-4" /> Add Sheet Row
@@ -1116,46 +1267,81 @@ export function TakeoffSection({
         {/* Moldings and glue: quantities, worked out from the sheets */}
         <div className="border-t border-border/40 p-4" data-testid="section-moldings-glue">
           <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Moldings & Glue</h3>
+          <p className="mt-1 text-[11px] text-muted-foreground" data-testid="text-molding-rule">
+            Your rule: 4 ft tall material takes a cap top and bottom (a full stick each) and one divider; taller than 4 ft, one cap stick for top and bottom.
+            Corners: the pieces you type per room from the plans, never guessed. Length: 8 ft molding for sheets 8 ft high or less, 10 ft above.
+          </p>
+          <p className="mt-0.5 text-[11px] font-medium text-amber-700" data-testid="text-molding-assumed">{MOLDING_PER_SHEET_ASSUMED}</p>
           <div className="mt-3 space-y-3 text-sm">
-            {moldings.map((line) => (
-              <div key={line.lengthFt} className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid={`row-molding-${line.lengthFt}`}>
+            {molding.lines.length === 0 && molding.legacy.length === 0 && (
+              <p className="text-xs text-muted-foreground">No moldings yet: type wall lengths and heights.</p>
+            )}
+            {molding.legacy.map((l) => (
+              <div key={`legacy-${l.lengthFt}`} className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid={`row-molding-legacy-${l.lengthFt}`}>
                 <span className="w-56 text-muted-foreground">
-                  {line.lengthFt} ft molding
-                  <span className="block text-[10px]">
-                    {line.lengthFt === 8 ? "for sheets 8 ft high or less" : "for sheets above 8 ft"}
-                  </span>
+                  {l.lengthFt} ft molding, all kinds
+                  <span className="block text-[10px]">typed before moldings were counted by kind</span>
                 </span>
-                <Input
-                  type="number"
-                  min={0}
-                  className="h-8 w-24 text-xs font-mono"
+                <span className="font-mono font-medium">{l.count}</span>
+                <Badge variant="outline" className="text-[10px] border-primary/50">yours</Badge>
+                <span className="text-xs text-amber-700">Kept as you typed it; the {l.lengthFt} ft counts by kind below are not used while it is here.</span>
+                <button
+                  type="button"
+                  className="text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+                  onClick={() => setSheetRows((rows) => setMoldingCount(rows, l.lengthFt, null))}
+                  data-testid={`button-molding-legacy-clear-${l.lengthFt}`}
+                >
+                  count {l.lengthFt} ft by kind instead
+                </button>
+              </div>
+            ))}
+            {molding.lines.map((line) => (
+              <div
+                key={line.key}
+                className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${legacyLengths.has(line.lengthFt) ? "opacity-50" : ""}`}
+                data-testid={`row-molding-${line.key}`}
+              >
+                <span className="w-56 text-muted-foreground">
+                  {MOLDING_KIND_NAMES[line.kind]}, {line.lengthFt} ft
+                </span>
+                <CountBox
+                  className="h-8 w-20 text-xs font-mono"
                   value={line.count}
-                  disabled={line.sheets === 0 && !line.typed}
-                  onChange={(e) => setSheetRows((rows) => setMoldingCount(rows, line.lengthFt, num(e.target.value)))}
-                  data-testid={`input-molding-count-${line.lengthFt}`}
+                  testId={`input-molding-${line.key}`}
+                  onProblem={reportCountProblem}
+                  onChange={(n) => setSheetRows((rows) => setKindCount(rows, line.key, n))}
                 />
                 <span className="text-xs text-muted-foreground">pieces</span>
-                {line.sheets === 0 && !line.typed ? (
-                  <span className="text-xs text-muted-foreground">no sheets of this height</span>
-                ) : line.typed ? (
+                {line.typed ? (
                   <>
-                    <Badge variant="outline" className="text-[10px] border-primary/50" data-testid={`badge-molding-source-${line.lengthFt}`}>yours</Badge>
+                    <Badge variant="outline" className="text-[10px] border-primary/50" data-testid={`badge-molding-source-${line.key}`}>yours</Badge>
                     <button
                       type="button"
                       className="text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground"
-                      onClick={() => setSheetRows((rows) => setMoldingCount(rows, line.lengthFt, null))}
-                      data-testid={`button-molding-reset-${line.lengthFt}`}
+                      onClick={() => setSheetRows((rows) => setKindCount(rows, line.key, null))}
+                      data-testid={`button-molding-reset-${line.key}`}
                     >
-                      back to one per sheet ({line.suggested})
+                      back to the rule ({line.suggested})
                     </button>
                   </>
                 ) : (
-                  <span className="text-xs font-medium text-amber-700" data-testid={`text-molding-assumed-${line.lengthFt}`}>
-                    assumed one per sheet: tell us your rule
-                  </span>
+                  <span className="text-[11px] text-muted-foreground" data-testid={`text-molding-working-${line.key}`}>{line.working}</span>
                 )}
+                {line.assumed.map((a) => (
+                  <span key={a} className="text-[11px] font-medium text-amber-700">{a}</span>
+                ))}
               </div>
             ))}
+            {molding.notCounted.length > 0 && (
+              <ul className="list-disc pl-5 text-[11px] text-amber-700" data-testid="list-molding-not-counted">
+                {molding.notCounted.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            )}
+            {sheetRows.length === 0 && molding.lines.length > 0 && (
+              <p className="text-[11px] text-muted-foreground">Add a sheet row to type over a molding count.</p>
+            )}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="row-glue">
               <span className="w-56 text-muted-foreground">
                 Glue

@@ -4,19 +4,13 @@ import { useToast } from "@/hooks/use-toast"
 import { Printer } from "lucide-react"
 // The list itself (quantities, working, assumptions) and its printed page are
 // built by the shared rules, so the screen and the PDF always say the same.
-import { materialListHtml, type MaterialList } from "@/lib/takeoff-rules"
+import { MOLDING_KIND_NAMES, WHOSE, materialListHtml, moldingFrom, type MaterialList } from "@/lib/takeoff-rules"
 
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" })
 
-const WHOSE = {
-  suggested: "suggested from the wall lengths",
-  yours: "your own count",
-  both: "part suggested, part your own",
-} as const
-
 /**
- * The Material list on screen: sheets by size, moldings by length, glue
+ * The Material list on screen: sheets by size, moldings by kind and length, glue
  * buckets, the rooms with their wall lengths and heights, and the assumptions
  * used. "Print / save as PDF" opens the same list as a printable page (the way
  * the proposal is exported). Prices appear only when some were typed.
@@ -116,14 +110,20 @@ export function MaterialListDialog({
               </tbody>
             </table>
           )}
+          {list.sizeWorking.length > 0 && (
+            <p className="mt-1 text-xs text-muted-foreground" data-testid="text-material-size-working">
+              Suggested from the walls, rounded up once per size: {list.sizeWorking.join("; ")}.
+            </p>
+          )}
 
           <h3 className={h3}>Moldings</h3>
-          {list.moldings.length === 0 ? (
+          {list.moldings.length + list.legacyMoldings.length === 0 ? (
             <p className="text-muted-foreground">No moldings yet.</p>
           ) : (
             <table className="w-full border border-border/60" data-testid="table-material-moldings">
               <thead>
                 <tr className="bg-muted/30">
+                  <th className={th}>Kind</th>
                   <th className={th}>Length</th>
                   <th className={`${th} text-right`}>Pieces</th>
                   <th className={th}>Count from</th>
@@ -131,16 +131,24 @@ export function MaterialListDialog({
               </thead>
               <tbody className="divide-y divide-border/40">
                 {list.moldings.map((m) => (
-                  <tr key={m.lengthFt} data-testid={`row-material-molding-${m.lengthFt}`}>
-                    <td className={td}>{m.lengthFt} ft molding</td>
+                  <tr key={m.key} data-testid={`row-material-molding-${m.key}`}>
+                    <td className={td}>{MOLDING_KIND_NAMES[m.kind]}</td>
+                    <td className={`${td} font-mono`}>{m.lengthFt} ft</td>
                     <td className={`${td} text-right font-mono font-medium`}>{m.count}</td>
-                    <td className={td}>
-                      {m.typed ? (
-                        "your own count"
-                      ) : (
-                        <span className="text-amber-700 font-medium">ASSUMED one per sheet (not a confirmed rule)</span>
+                    <td className={`${td} text-xs`}>
+                      {moldingFrom(m)}
+                      {!m.typed && (m.kind === "cap" || m.kind === "divider") && (
+                        <span className="ml-1 text-amber-700 font-medium">(per sheet: assumed)</span>
                       )}
                     </td>
+                  </tr>
+                ))}
+                {list.legacyMoldings.map((l) => (
+                  <tr key={`legacy-${l.lengthFt}`} data-testid={`row-material-molding-legacy-${l.lengthFt}`}>
+                    <td className={td}>All kinds</td>
+                    <td className={`${td} font-mono`}>{l.lengthFt} ft</td>
+                    <td className={`${td} text-right font-mono font-medium`}>{l.count}</td>
+                    <td className={`${td} text-xs`}>your own count, typed before moldings were counted by kind</td>
                   </tr>
                 ))}
               </tbody>
@@ -177,8 +185,11 @@ export function MaterialListDialog({
                     <td className={`${td} font-mono text-xs`}>{r.wallText || "—"}</td>
                     <td className={`${td} text-right font-mono whitespace-nowrap`}>{r.wallFeet > 0 ? `${Number(r.wallFeet.toFixed(2))} ft` : "—"}</td>
                     <td className={td}>{r.heightText}</td>
-                    <td className={`${td} font-mono whitespace-nowrap`}>{r.sheets !== null ? `${r.sheets} × ${r.sheetSize}` : "—"}</td>
-                    <td className={`${td} text-xs text-muted-foreground`}>{r.sheets !== null ? r.arithmetic : r.problem}</td>
+                    <td className={`${td} font-mono`}>{r.sheets !== null ? r.sheetsText : "—"}</td>
+                    <td className={`${td} text-xs text-muted-foreground`}>
+                      {r.wallWorking && <div>{r.wallWorking}</div>}
+                      <div>{r.sheets !== null ? r.arithmetic : r.problem}</div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
