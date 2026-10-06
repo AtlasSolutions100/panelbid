@@ -1036,6 +1036,8 @@ export interface CountCheck {
   words: string[];
   /** Rooms with something typed but no wall length or no usable height. */
   uncountedRooms: number;
+  /** Rooms measured but still not counted (4x4 above 4 ft, a stack with nothing to start from). */
+  notCountedRooms: number;
   /** False when no room can be counted: the counts are not checked at all. */
   checked: boolean;
   /** What was not checked, in words, or null. */
@@ -1062,7 +1064,23 @@ export function countCheck(roomRows: RoomRow[], sheetRows: SheetRow[]): CountChe
   const job = suggestSheets(said);
   const uncounted = job.rooms.filter((r) => r.sheets === null);
   const checked = uncounted.length < job.rooms.length;
-  const uncountedSizes = new Set(uncounted.map((r) => r.sheetSize));
+  // Not measured: no wall length, or no usable height. Its plain size is known
+  // when it has a height. A room that is measured but still cannot be counted
+  // (a 4x4 ticked above 4 ft, a stack with nothing to start from, courses that
+  // cannot be read) may take any size: every size is unknown (round 5).
+  const isUnmeasured = (r: RoomSuggestion) => r.wall.units <= 0 || r.height.feet === null;
+  const unmeasured = uncounted.filter(isUnmeasured);
+  const otherUncounted = job.rooms
+    .map((r, i) => ({ r, label: roomLabel(said[i]!, i) }))
+    .filter(({ r }) => r.sheets === null && !isUnmeasured(r));
+  const uncountedSizes = new Set<SheetSize | null>(unmeasured.map((r) => r.sheetSize));
+  if (otherUncounted.length > 0) uncountedSizes.add(null);
+  const reason = (r: RoomSuggestion): string => {
+    const problem = r.problem ?? "";
+    if (/4x4 is ticked/.test(problem)) return "a 4x4 panel taller than 4 ft";
+    if (/no other sheet size/.test(problem)) return "no sheet size on the job to start the stack";
+    return problem;
+  };
   const differences: CountDifference[] = !checked
     ? []
     : SHEET_SIZES.flatMap((size) => {
@@ -1074,14 +1092,25 @@ export function countCheck(roomRows: RoomRow[], sheetRows: SheetRow[]): CountChe
         return [{ size, need, have }];
       });
   const words = countDifferenceWords(differences);
-  const n = uncounted.length;
-  const note = !checked
-    ? job.rooms.length > 0 || sheetRows.some((r) => r.sheetsNeeded > 0)
-      ? "No room has both a wall length and a height, so the sheet counts are not checked against the walls."
-      : null
-    : n > 0
-      ? `${n} room${n === 1 ? " has" : "s have"} no wall length or height, so ${n === 1 ? "it is" : "they are"} not checked.`
-      : null;
+  const n = unmeasured.length;
+  const others = otherUncounted.map(({ r, label }) => `${label} cannot be counted: ${reason(r)}`);
+  let note: string | null;
+  if (!checked) {
+    note =
+      job.rooms.length > 0 || sheetRows.some((r) => r.sheetsNeeded > 0)
+        ? others.length === 0
+          ? "No room has both a wall length and a height, so the sheet counts are not checked against the walls."
+          : `No room can be counted, so the sheet counts are not checked against the walls. ${others.map((o) => `${o}.`).join(" ")}`
+        : null;
+  } else {
+    const parts = [
+      ...(n > 0
+        ? [`${n} room${n === 1 ? " has" : "s have"} no wall length or height, so ${n === 1 ? "it is" : "they are"} not checked.`]
+        : []),
+      ...others.map((o) => `${o}, so it is not checked.`),
+    ];
+    note = parts.length > 0 ? parts.join(" ") : null;
+  }
   const held = SHEET_SIZES.map(
     (size) => `${size}=${sheetRows.filter((r) => r.sheetSize === size).reduce((sum, r) => sum + r.sheetsNeeded, 0)}`,
   ).join(",");
@@ -1089,6 +1118,7 @@ export function countCheck(roomRows: RoomRow[], sheetRows: SheetRow[]): CountChe
     differences,
     words,
     uncountedRooms: n,
+    notCountedRooms: otherUncounted.length,
     checked,
     note,
     fingerprint: `rows:${held}|seen:${words.join(";")}`,

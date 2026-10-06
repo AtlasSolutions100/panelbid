@@ -93,3 +93,36 @@ describe("the fingerprint ties a confirmation to what he saw (MAJOR-R4-2)", () =
     expect(a.fingerprint.length).toBeGreaterThan(0);
   });
 });
+
+describe("a measured room that cannot be counted is left out too (critic round 5, MINOR-R5-1)", () => {
+  it("a 4x4 ticked on an 8 ft panel: no 'need 0' for his 4x4, and the note gives the real reason", () => {
+    const rooms = [room({ roomName: "Hall", roomNumber: "105", wallLengths: "32", materialHeight: "8'", fourByFour: true })];
+    const rows: SheetRow[] = [{ sheetsNeeded: 8, sheetSize: "4x4", pricePerSheet: 0, sheetsSource: "typed" }];
+    const c = countCheck(rooms, rows);
+    expect(c.words).toEqual([]);
+    expect(c.note).toBe("No room can be counted, so the sheet counts are not checked against the walls. Hall 105 cannot be counted: a 4x4 panel taller than 4 ft.");
+  });
+
+  it("a tall wall with no sheet size to start a stack from, beside a counted room", () => {
+    const rooms = [
+      room({ wallLengths: "20", materialHeight: "8'" }),
+      room({ roomName: "Cooler", roomNumber: "104", wallLengths: "24", materialHeight: "14'", stackCourses: "ten" }),
+    ];
+    const rows: SheetRow[] = [
+      ...applySuggestions([], rooms, []),
+      { sheetsNeeded: 6, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "typed" },
+      { sheetsNeeded: 3, sheetSize: "4x12", pricePerSheet: 0, sheetsSource: "typed" },
+    ];
+    const c = countCheck(rooms, rows);
+    expect(c.words).toEqual([]); // never "need 0" for sizes the cooler may take
+    expect(c.note).toBe('Cooler 104 cannot be counted: can\'t read "ten" in the courses: type them like 10 + 4, so it is not checked.');
+  });
+
+  it("only a tall wall and nothing else on the job: the note names the stack", () => {
+    const rooms = [room({ roomName: "Cooler", roomNumber: "104", wallLengths: "24", materialHeight: "14'" })];
+    const rows: SheetRow[] = [{ sheetsNeeded: 6, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "typed" }];
+    const c = countCheck(rooms, rows);
+    expect(c.words).toEqual([]);
+    expect(c.note).toMatch(/Cooler 104 cannot be counted: no sheet size on the job to start the stack/);
+  });
+});
