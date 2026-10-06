@@ -69,6 +69,8 @@ export interface MaterialRoomLine {
   arithmetic: string;
   /** Why the room has no suggested count. Null when it has one. */
   problem: string | null;
+  /** What the other wall rounding would give, when it differs (assumed). */
+  readingNote: string | null;
 }
 
 export interface MaterialList {
@@ -175,6 +177,7 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
       sheetsText: s.sheets !== null ? roomSheetsText(s.parts) : "",
       arithmetic: s.arithmetic,
       problem: s.problem,
+      readingNote: s.readingNote,
     };
   });
 
@@ -330,7 +333,7 @@ export function materialListHtml(list: MaterialList): string {
         `<td class="n">${r.wallFeet > 0 ? `${Number(r.wallFeet.toFixed(2))} ft` : "&mdash;"}</td>` +
         `<td>${esc(r.heightText)}</td>` +
         `<td>${r.sheets !== null ? esc(r.sheetsText) : "&mdash;"}</td>` +
-        `<td class="w">${esc(r.wallWorking)}${r.wallWorking ? "<br>" : ""}${esc(r.sheets !== null ? r.arithmetic : (r.problem ?? ""))}</td></tr>`,
+        `<td class="w">${esc(r.wallWorking)}${r.wallWorking ? "<br>" : ""}${esc(r.sheets !== null ? r.arithmetic : (r.problem ?? ""))}${r.readingNote ? `<br>${esc(r.readingNote)}` : ""}</td></tr>`,
     )
     .join("");
   const place = [list.address, list.city].map((v) => v.trim()).filter(Boolean).join(", ");

@@ -67,13 +67,14 @@ describe("each wall is rounded up before anything is added (answer 4)", () => {
     expect(roundWallUp(3)).toBe(4);
   });
 
-  it("the open point lives in ONE constant, set to the next 4 ft until he answers", () => {
-    expect(WALL_ROUND_UP_TO_FT).toBe(4);
+  // Repair 1 (the desk's ruling: walls up to the next even foot): the constant is 2 now; both readings keep a test.
+  it("the open point lives in ONE constant, set to the next even foot until he answers", () => {
+    expect(WALL_ROUND_UP_TO_FT).toBe(2);
   });
 
-  it("a 5 ft wall: 8 ft when walls go up to the next 4 ft (the reading built)", () => {
+  it("a 5 ft wall: 8 ft when walls go up to the next 4 ft (the other reading)", () => {
     expect(roundWallUp(5, 4)).toBe(8);
-    expect(roundWallUp(5)).toBe(8);
+    expect(roundWallUp(5)).toBe(6); // the reading built
   });
 
   it("a 5 ft wall: 6 ft when walls go up to the next even foot (the other reading)", () => {
@@ -87,7 +88,9 @@ describe("each wall is rounded up before anything is added (answer 4)", () => {
     expect(roundWallUp(8)).toBe(8);
     expect(roundWallUp(12)).toBe(12);
     expect(roundWallUp(7.5)).toBe(8);
-    expect(roundWallUp(8 + 1 / 12)).toBe(12);
+    // Repair 1 (the desk's ruling: walls up to the next even foot): 8 ft 1 in counts as 10 ft (12 ft at the next 4 ft)
+    expect(roundWallUp(8 + 1 / 12)).toBe(10);
+    expect(roundWallUp(8 + 1 / 12, 4)).toBe(12);
   });
 
   it("rounds each wall, then adds them, and shows the working per wall", () => {
@@ -104,10 +107,9 @@ describe("each wall is rounded up before anything is added (answer 4)", () => {
   });
 
   it("a room of 7 + 3 + 5 ft: 20 ft with the 4 ft reading, 18 ft with the even-foot reading", () => {
-    expect(suggestRoom(room({ wallLengths: "7 + 3 + 5", materialHeight: "8" })).countedFeet).toBe(20);
-    expect(
-      suggestRoom(room({ wallLengths: "7 + 3 + 5", materialHeight: "8" }), { rounding: 2 }).countedFeet,
-    ).toBe(18);
+    // Repair 1 (the desk's ruling: walls up to the next even foot): the default is now the even-foot reading
+    expect(suggestRoom(room({ wallLengths: "7 + 3 + 5", materialHeight: "8" }), { rounding: 4 }).countedFeet).toBe(20);
+    expect(suggestRoom(room({ wallLengths: "7 + 3 + 5", materialHeight: "8" })).countedFeet).toBe(18);
   });
 
   it("rounds the job's sheet count up once per sheet size, at the end", () => {
@@ -430,7 +432,8 @@ describe("a takeoff saved before this update", () => {
   });
 
   it("new suggested rows are marked with the rules they were made under", () => {
-    expect(CURRENT_RULES).toBe(2);
+    // Repair 1: the rules mark moved on with the rounding change (MAJOR-1)
+    expect(CURRENT_RULES).toBe(3);
     const rows = applySuggestions([], oldRooms, []);
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.rules === CURRENT_RULES)).toBe(true);
@@ -467,7 +470,8 @@ describe("the Material list shows each molding kind, length and count", () => {
     const html = materialListHtml(list);
     expect(html).toMatch(/Cap<\/td><td>8 ft/);
     expect(html).toMatch(/Inside corner<\/td><td>8 ft/);
-    expect(list.assumptions.join(" ")).toMatch(/next 4 ft.*ASSUMED/);
+    // Repair 1 (the desk's ruling: walls up to the next even foot): the words name the even foot, still ASSUMED
+    expect(list.assumptions.join(" ")).toMatch(/next even foot.*ASSUMED/);
     expect(list.rooms[0]!.wallWorking).toBe("7 ft counted as 8 ft + 3 ft counted as 4 ft = 12 ft");
   });
 });

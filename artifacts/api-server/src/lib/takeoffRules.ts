@@ -307,10 +307,14 @@ export type WallRounding = 4 | 2;
 /**
  * THE OPEN POINT, in one place. 4 = each wall up to the next 4 ft (a 5 ft wall
  * counts as 8 ft); 2 = up to the next even foot (a 5 ft wall counts as 6 ft).
- * ASSUMED 4 until he answers "A 5-foot wall: do you count it as 8 feet or as
- * 6?". His answer is a change to this one line (and its test).
+ * ASSUMED 2 (the desk's ruling, repair 1: his last sentence, "at the end we
+ * round the total sheet count up", only does something when a room can come
+ * out in part sheets) until he answers "A 5-foot wall: do you count it as 8
+ * feet or as 6?". His answer is a change to this one line (and its tests).
+ * Changing it also needs CURRENT_RULES moved on, so rows saved under the old
+ * value keep their counts.
  */
-export const WALL_ROUND_UP_TO_FT: WallRounding = 4;
+export const WALL_ROUND_UP_TO_FT: WallRounding = 2;
 
 /** One wall in feet, rounded up to the step (8 stays 8; 7 -> 8; 3 -> 4). */
 export function roundWallUp(feet: number, stepFt: WallRounding = WALL_ROUND_UP_TO_FT): number {
@@ -328,7 +332,7 @@ function roundUnitsUp(units: number, stepFt: WallRounding): number {
 export function wallRoundingWords(stepFt: WallRounding = WALL_ROUND_UP_TO_FT): string {
   return stepFt === 4
     ? "Each wall is rounded up to the next 4 ft before the walls are added (7 ft counts as 8 ft, 3 ft as 4 ft, 5 ft as 8 ft). ASSUMED: your examples also fit \"up to the next even foot\" (5 ft as 6 ft); we asked which you use."
-    : "Each wall is rounded up to the next even foot before the walls are added (7 ft counts as 8 ft, 3 ft as 4 ft, 5 ft as 6 ft).";
+    : "Each wall is rounded up to the next even foot before the walls are added (7 ft counts as 8 ft, 3 ft as 4 ft, 5 ft as 6 ft). ASSUMED: your examples also fit \"up to the next 4 ft\" (5 ft as 8 ft); we asked which you use.";
 }
 
 export interface RoundedWall {
@@ -480,6 +484,13 @@ export interface RoomSuggestion {
   fourByFour: FourByFour;
   /** The courses of a wall taller than 12 ft, else null. */
   stack: RoomStack | null;
+  /**
+   * What the room would come to under the other wall rounding, when that
+   * gives a different sheet count. Null when both readings agree.
+   */
+  otherReading: { roundingFt: WallRounding; countedFeet: number; sheets: number } | null;
+  /** The same in words, marked assumed. Null when both readings agree. */
+  readingNote: string | null;
 }
 
 export interface SuggestOptions {
@@ -490,6 +501,8 @@ export interface SuggestOptions {
    * from. Null or absent: none, so a wall taller than 12 ft asks.
    */
   jobSheetLengthFt?: number | null;
+  /** Every upright sheet length the rest of the job uses (for the stack's words). */
+  jobSheetLengthsFt?: number[];
 }
 
 function sheetsNoun(n: number, word = "sheet"): string {
@@ -593,6 +606,21 @@ function partWorking(part: SheetPart, countedFeet: number): string {
  */
 export function suggestRoom(row: RoomRow, options: SuggestOptions = {}): RoomSuggestion {
   const rounding = options.rounding ?? WALL_ROUND_UP_TO_FT;
+  const result = suggestRoomWith(row, { ...options, rounding });
+  if (result.sheets === null) return result;
+  const other: WallRounding = rounding === 2 ? 4 : 2;
+  const alt = suggestRoomWith(row, { ...options, rounding: other });
+  if (alt.sheets === null || alt.sheets === result.sheets) return result;
+  const name = (step: WallRounding) => (step === 2 ? "the next even foot" : "the next 4 ft");
+  return {
+    ...result,
+    otherReading: { roundingFt: other, countedFeet: alt.countedFeet, sheets: alt.sheets },
+    readingNote: `assumed: each wall up to ${name(rounding)}; up to ${name(other)} this room would be ${feetText(alt.countedFeet)}, ${plain(alt.sheets)} ${sheetsNoun(alt.sheets)}`,
+  };
+}
+
+function suggestRoomWith(row: RoomRow, options: SuggestOptions & { rounding: WallRounding }): RoomSuggestion {
+  const rounding = options.rounding;
   const wall = readWallLengths(row.wallLengths);
   const height = resolvePanelHeight(row);
   const fourByFour = fourByFourFor(row);
@@ -620,6 +648,8 @@ export function suggestRoom(row: RoomRow, options: SuggestOptions = {}): RoomSug
     height,
     fourByFour,
     warning: null,
+    otherReading: null,
+    readingNote: null,
   };
   const none = (problem: string, sheetSize: SheetSize | null = null): RoomSuggestion => ({
     ...base,
@@ -721,7 +751,11 @@ export function suggestRoom(row: RoomRow, options: SuggestOptions = {}): RoomSug
     }
     courses = suggestStack(h, start);
     typed = false;
-    note = `the rest of the job uses ${start} ft sheets, so it starts with a ${start} ft sheet: your call: change it if you would stack it differently`;
+    const lengths = [...new Set(options.jobSheetLengthsFt ?? [start])].sort((a, b) => a - b);
+    note =
+      lengths.length > 1
+        ? `the job has ${lengths.map((l) => `${l} ft`).join(" and ")} sheets; this starts with a ${start} ft sheet, the longest (your example: "if we have 10s on the job"): your call: change it if you would stack it differently`
+        : `the rest of the job uses ${start} ft sheets, so it starts with a ${start} ft sheet: your call: change it if you would stack it differently`;
   }
   const reach = courses.reduce((a, b) => a + b, 0);
   if (reach < h - 1e-9) {
@@ -735,7 +769,10 @@ export function suggestRoom(row: RoomRow, options: SuggestOptions = {}): RoomSug
     return partOf(size, onSide, c, countedUnits, false);
   });
   const sheets = parts.reduce((sum, p) => sum + p.sheets, 0);
-  const text = courses.map(courseWords).join(" + ");
+  const over = reach - h;
+  const text =
+    courses.map(courseWords).join(" + ") +
+    (over > 1e-9 ? `; reaches ${feetText(reach)}, so the top course cut by ${feetText(over)}` : "");
   return {
     ...base,
     layout: "stack",
@@ -748,6 +785,8 @@ export function suggestRoom(row: RoomRow, options: SuggestOptions = {}): RoomSug
     problem: null,
     assumed,
     stack: { courses, typed, text, note },
+    otherReading: null,
+    readingNote: null,
   };
 }
 
@@ -775,15 +814,17 @@ export function suggestSheets(roomRows: RoomRow[], options: { rounding?: WallRou
   // rest of the job uses ("depending on the rest of the job").
   const first = roomRows.map((row) => suggestRoom(row, { rounding: options.rounding }));
   let jobSheetLengthFt: number | null = null;
+  const jobSheetLengthsFt: number[] = [];
   for (const r of first) {
     if (r.layout !== "upright" && r.layout !== "onSide") continue;
     const len = Number(r.parts[0]!.size.split("x")[1]);
+    jobSheetLengthsFt.push(len);
     jobSheetLengthFt = jobSheetLengthFt === null ? len : Math.max(jobSheetLengthFt, len);
   }
   const rooms = roomRows.map((row, i) => {
     const h = first[i]!.height.feet;
     return h !== null && h > LONGEST_SHEET_FT
-      ? suggestRoom(row, { rounding: options.rounding, jobSheetLengthFt })
+      ? suggestRoom(row, { rounding: options.rounding, jobSheetLengthFt, jobSheetLengthsFt })
       : first[i]!;
   });
   const exactBySize = zeroBySize();
@@ -810,8 +851,13 @@ export function suggestSheets(roomRows: RoomRow[], options: { rounding?: WallRou
   return { rooms, bySize, exactBySize, sizeWorking, jobSheetLengthFt };
 }
 
-/** The rules a suggested row was made under. Rows made before update 2 have none. */
-export const CURRENT_RULES = 2;
+/**
+ * The rules a suggested row was made under. Rows made before update 2 have
+ * none; 2 = update 2 with walls up to the next 4 ft (never published); 3 =
+ * repair 1, walls up to the next even foot. Move it on whenever a rule that
+ * changes counts changes, so saved rows keep their counts.
+ */
+export const CURRENT_RULES = 3;
 
 /** Any suggested row, whichever rules it was made under. */
 export function isSuggested(row: SheetRow): boolean {
@@ -870,6 +916,10 @@ export function applySuggestions(
   nextRooms: RoomRow[],
   sheetRows: SheetRow[],
 ): SheetRow[] {
+  // A job counted under the earlier rules: its counts stay exactly as saved
+  // until he converts every size at once (convertToNewRules). Adding a new
+  // suggested row now would count a room twice (critic, BLOCKER-1).
+  if (jobUnderEarlierRules(sheetRows)) return refreshSuggestedRows(nextRooms, sheetRows);
   const before = suggestSheets(prevRooms).bySize;
   const after = suggestSheets(nextRooms).bySize;
   const rows = [...sheetRows];
@@ -899,6 +949,62 @@ export function applySuggestions(
         r.moldingCount == null
       ),
   );
+}
+
+/** True when any sheet row was suggested under the earlier rules. */
+export function jobUnderEarlierRules(sheetRows: SheetRow[]): boolean {
+  return sheetRows.some(suggestedEarlier);
+}
+
+export interface SizeChange {
+  size: SheetSize;
+  before: number;
+  after: number;
+}
+
+function countsBySize(rows: SheetRow[]): Record<SheetSize, number> {
+  const out = zeroBySize();
+  for (const r of rows) out[r.sheetSize] += r.sheetsNeeded;
+  return out;
+}
+
+/**
+ * "Use the new counts": every row suggested under the earlier rules is put
+ * under the current rules at once, a size the rooms now need gets its
+ * suggested row, and an emptied suggested row goes. Rows he typed stay his.
+ * The changes per size come back so the page can show them first.
+ */
+export function convertToNewRules(
+  roomRows: RoomRow[],
+  sheetRows: SheetRow[],
+): { rows: SheetRow[]; changes: SizeChange[] } {
+  if (!jobUnderEarlierRules(sheetRows)) return { rows: sheetRows, changes: [] };
+  const before = countsBySize(sheetRows);
+  const bySize = suggestSheets(roomRows).bySize;
+  const rows: SheetRow[] = sheetRows.map((r) => (suggestedEarlier(r) ? { ...r, rules: CURRENT_RULES } : r));
+  for (const size of SHEET_SIZES) {
+    if (bySize[size] <= 0 || rows.some((r) => r.sheetSize === size)) continue;
+    const row: SheetRow = {
+      sheetsNeeded: bySize[size],
+      sheetSize: size,
+      pricePerSheet: 0,
+      sheetsSource: "suggested",
+      rules: CURRENT_RULES,
+    };
+    const bigger = rows.findIndex((r) => SHEET_SIZES.indexOf(r.sheetSize) > SHEET_SIZES.indexOf(size));
+    if (bigger === -1) rows.push(row);
+    else rows.splice(bigger, 0, row);
+  }
+  const next = refreshSuggestedRows(roomRows, rows).filter(
+    (r) => !(followsWalls(r) && r.sheetsNeeded === 0 && !(r.pricePerSheet > 0) && r.moldingCount == null),
+  );
+  const after = countsBySize(next);
+  const changes = SHEET_SIZES.filter((size) => before[size] !== after[size]).map((size) => ({
+    size,
+    before: before[size],
+    after: after[size],
+  }));
+  return { rows: next, changes };
 }
 
 /** What a room spec gives a new takeoff row. */
@@ -1169,6 +1275,14 @@ export function moldingsByKind(
   const job = suggestSheets(roomRows, options);
   const typed = typedKindCounts(sheetRows);
   const notCounted: string[] = [];
+  // Sheets counted under the earlier rules: caps and dividers worked out from
+  // the new rules would not match the sheet counts beside them.
+  const earlier = jobUnderEarlierRules(sheetRows);
+  if (earlier) {
+    notCounted.push(
+      'Caps and dividers: this job\'s sheets were counted under the earlier rules, so caps and dividers are not worked out from the new rules until you press "use the new counts". Type them yourself if you need them now.',
+    );
+  }
 
   type Acc = {
     caps4: number;
@@ -1232,6 +1346,11 @@ export function moldingsByKind(
   ) => {
     const key = moldingKey(kind, lengthFt);
     const mine = typed.get(key);
+    if (earlier && (kind === "cap" || kind === "divider")) {
+      if (mine === undefined) return;
+      suggested = 0;
+      working = "not worked out: the sheets were counted under the earlier rules";
+    }
     if (!(suggested > 0) && mine === undefined) return;
     lines.push({
       key,

@@ -41,37 +41,38 @@ const input = (over: Partial<MaterialListInput> = {}): MaterialListInput => ({
 describe("material list", () => {
   const list = buildMaterialList(input());
 
-  // Update 2: each wall counts up to the next 4 ft (Restroom: 6 + 6 + 5'-6" +
-  // 5'-6" counts as 32 ft, 8 sheets), and moldings are counted by kind.
+  // Update 2, repair 1: each wall counts up to the next even foot (Restroom:
+  // 6 + 6 + 5'-6" + 5'-6" counts as 24 ft, 6 sheets; Kitchen 34 ft, 8.5,
+  // rounded with the job to 9), and moldings are counted by kind.
   it("lists the sheets by size", () => {
     expect(list.sheets).toEqual([
       { size: "4x8", count: 9, whose: "suggested", suggested: 9, price: null, total: null },
-      { size: "4x10", count: 18, whose: "suggested", suggested: 18, price: null, total: null },
+      { size: "4x10", count: 16, whose: "suggested", suggested: 16, price: null, total: null },
     ]);
-    expect(list.totalSheets).toBe(27);
+    expect(list.totalSheets).toBe(25);
   });
 
   it("lists the moldings by kind and length, and the glue buckets", () => {
     expect(list.moldings.map((m) => [m.kind, m.lengthFt, m.count, m.typed])).toEqual([
       ["cap", 8, 9, false],
       ["divider", 8, 9, false],
-      ["cap", 10, 18, false],
-      ["divider", 10, 18, false],
+      ["cap", 10, 16, false],
+      ["divider", 10, 16, false],
     ]);
     expect(list.glue.buckets).toBe(3);
-    expect(list.glue.arithmetic).toBe("27 sheets ÷ 12 a bucket = 2.25, rounded up to 3 buckets");
+    expect(list.glue.arithmetic).toBe("25 sheets ÷ 12 a bucket = 2.08, rounded up to 3 buckets");
   });
 
   it("lists each room with its wall length, height and working", () => {
     expect(list.rooms.map((r) => [r.label, r.wallFeet, r.heightText, r.sheets, r.sheetSize])).toEqual([
-      ["Kitchen 101", 34, "8 ft", 9, "4x8"],
+      ["Kitchen 101", 34, "8 ft", 8.5, "4x8"],
       ["Prep 102", 40, "9 ft", 10, "4x10"],
-      ["Restroom 103", 23, "10 ft (assumed to ceiling)", 8, "4x10"],
+      ["Restroom 103", 23, "10 ft (assumed to ceiling)", 6, "4x10"],
     ]);
     expect(list.rooms[2]!.wallWorking).toBe(
-      "6 ft counted as 8 ft + 6 ft counted as 8 ft + 5 ft 6 in counted as 8 ft + 5 ft 6 in counted as 8 ft = 32 ft",
+      "6 ft + 6 ft + 5 ft 6 in counted as 6 ft + 5 ft 6 in counted as 6 ft = 24 ft",
     );
-    expect(list.rooms[2]!.arithmetic).toBe("32 ft ÷ 4 ft a sheet = 8 sheets of 4x10");
+    expect(list.rooms[2]!.arithmetic).toBe("24 ft ÷ 4 ft a sheet = 6 sheets of 4x10");
   });
 
   it("states every assumption used, in plain words", () => {
@@ -79,7 +80,7 @@ describe("material list", () => {
     expect(all).toMatch(/straight through doors and windows/);
     expect(all).toMatch(/no extra waste/i);
     expect(all).toMatch(/Restroom 103: no panel height.*floor to ceiling.*10 ft/);
-    expect(all).toMatch(/rounded up to the next 4 ft.*ASSUMED/);
+    expect(all).toMatch(/rounded up to the next even foot.*ASSUMED/); // repair 1
     expect(all).toMatch(/"Per sheet" is our reading of your words \(assumed\)/);
     expect(all).toMatch(/one bucket does 12 sheets/);
     // rooms whose height came from the plans are not listed as assumed
@@ -163,11 +164,11 @@ describe("material list", () => {
       );
     for (const height of ["4'", '48"']) {
       const list = wainscot(height);
-      // 36 ft counted ÷ 8 ft a sheet = 4.5, rounded up to 5
+      // repair 1: 34 ft counted ÷ 8 ft a sheet = 4.25, rounded up to 5
       expect(list.sheets).toEqual([
         { size: "4x8", count: 5, whose: "suggested", suggested: 5, price: null, total: null },
       ]);
-      expect(list.rooms[0]!.sheetsText).toBe("4.5 × 4x8 on its side");
+      expect(list.rooms[0]!.sheetsText).toBe("4.25 × 4x8 on its side");
       expect(materialListHtml(list)).not.toMatch(/about half/);
     }
     for (const height of ["4.01", "8'"]) {

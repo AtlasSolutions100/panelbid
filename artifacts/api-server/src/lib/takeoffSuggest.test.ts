@@ -146,12 +146,13 @@ describe("sheet size for a panel height", () => {
 describe("suggested sheets for a room", () => {
   // Update 2 (his answer 4): each wall is rounded up to the next 4 ft first,
   // and a room is no longer rounded on its own (the job rounds once per size).
+  // Repair 1 (the desk's ruling: walls up to the next even foot): 10 ft stays 10 ft, and the room keeps its 8.5 (the job rounds).
   it("is the counted wall divided by the 4 ft sheet width", () => {
     const s = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "9'" }));
-    expect(s.sheets).toBe(9); // 12 + 12 + 12 = 36 / 4
+    expect(s.sheets).toBe(8.5); // 12 + 12 + 10 = 34 / 4
     expect(s.sheetSize).toBe("4x10");
-    expect(s.wallWorking).toBe("12 ft + 12 ft + 10 ft counted as 12 ft = 36 ft");
-    expect(s.arithmetic).toBe("36 ft ÷ 4 ft a sheet = 9 sheets of 4x10");
+    expect(s.wallWorking).toBe("12 ft + 12 ft + 10 ft = 34 ft");
+    expect(s.arithmetic).toBe("34 ft ÷ 4 ft a sheet = 8.5 sheets of 4x10");
   });
 
   it("an exact fit stays as it is", () => {
@@ -159,15 +160,15 @@ describe("suggested sheets for a room", () => {
     expect(s.sheets).toBe(8);
     expect(s.sheetSize).toBe("4x8");
     expect(s.arithmetic).toBe("32 ft ÷ 4 ft a sheet = 8 sheets of 4x8");
-    // three walls of 5'-4" each count as 8 ft
-    expect(suggestRoom(room({ wallLengths: "5'-4\" + 5'-4\" + 5'-4\"", materialHeight: "8" })).sheets).toBe(6);
+    // Repair 1 (the desk's ruling: walls up to the next even foot): three walls of 5'-4" each count as 6 ft: 18 / 4
+    expect(suggestRoom(room({ wallLengths: "5'-4\" + 5'-4\" + 5'-4\"", materialHeight: "8" })).sheets).toBe(4.5);
   });
 
   it("adds no waste and takes out no openings: the walls are measured through doors and windows", () => {
     // 40 ft of wall is 10 sheets whatever doors are in it; nothing is added on top
     expect(suggestRoom(room({ wallLengths: "40", materialHeight: "8" })).sheets).toBe(10);
-    // 40.5 ft as one wall counts as 44 ft
-    expect(suggestRoom(room({ wallLengths: "40.5", materialHeight: "8" })).sheets).toBe(11);
+    // Repair 1 (the desk's ruling: walls up to the next even foot): 40.5 ft as one wall counts as 42 ft
+    expect(suggestRoom(room({ wallLengths: "40.5", materialHeight: "8" })).sheets).toBe(10.5);
   });
 
   it("uses the ceiling height when there is no panel height", () => {
@@ -187,12 +188,12 @@ describe("suggested sheets for a room", () => {
 
   it("a panel above 4 ft is an upright sheet: 4.01 ft and 8 ft", () => {
     const justOver = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "4.01" }));
-    expect(justOver.sheets).toBe(9);
+    expect(justOver.sheets).toBe(8.5); // Repair 1 (the desk's ruling: walls up to the next even foot): 34 ft / 4
     expect(justOver.sheetSize).toBe("4x8");
     expect(justOver.layout).toBe("upright");
     expect(suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "4'-0 1/2\"" })).layout).toBe("upright");
     const eight = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "8'" }));
-    expect(eight.sheets).toBe(9);
+    expect(eight.sheets).toBe(8.5);
     expect(eight.warning).toBeNull();
   });
 
@@ -218,7 +219,8 @@ describe("suggested sheet rows for the job", () => {
   it("adds the rooms up by sheet size (rounded up once per size)", () => {
     const s = suggestSheets(rooms);
     expect(s.bySize).toEqual({ "4x4": 0, "4x8": 9, "4x10": 16, "4x12": 0 });
-    expect(s.rooms.map((r) => r.sheets)).toEqual([9, 10, 6]);
+    // Repair 1 (the desk's ruling: walls up to the next even foot): the kitchen is 34 ft = 8.5; the job's 4x8 is still 9
+    expect(s.rooms.map((r) => r.sheets)).toEqual([8.5, 10, 6]);
   });
 
   it("fills empty sheet rows with the suggestion, marked as suggested", () => {
@@ -231,7 +233,8 @@ describe("suggested sheet rows for the job", () => {
   it("a suggested row follows the wall lengths", () => {
     const rows = applySuggestions([], rooms, []);
     const longer = rooms.map((r, i) => (i === 0 ? { ...r, wallLengths: "12 + 12 + 10 + 10" } : r));
-    expect(applySuggestions(rooms, longer, rows)[0]).toMatchObject({ sheetsNeeded: 12, sheetsSource: "suggested", rules: CURRENT_RULES });
+    // Repair 1 (the desk's ruling: walls up to the next even foot): 12 + 12 + 10 + 10 = 44 ft = 11
+    expect(applySuggestions(rooms, longer, rows)[0]).toMatchObject({ sheetsNeeded: 11, sheetsSource: "suggested", rules: CURRENT_RULES });
   });
 
   it("a row he typed over is never changed behind his back", () => {
@@ -263,7 +266,7 @@ describe("suggested sheet rows for the job", () => {
     const only10 = applySuggestions([], rooms, []).filter((r) => r.sheetSize !== "4x8");
     const longer = rooms.map((r, i) => (i === 0 ? { ...r, wallLengths: "12 + 12 + 10 + 10" } : r));
     expect(applySuggestions(rooms, longer, only10).map((r) => r.sheetsNeeded + " " + r.sheetSize)).toEqual([
-      "12 4x8",
+      "11 4x8", // Repair 1 (the desk's ruling: walls up to the next even foot): 44 ft = 11
       "16 4x10",
     ]);
   });
