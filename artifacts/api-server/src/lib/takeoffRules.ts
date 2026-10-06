@@ -886,6 +886,10 @@ export function suggestedEarlier(row: SheetRow): boolean {
  * never stored or printed.
  */
 export function refreshSuggestedRows(roomRows: RoomRow[], sheetRows: SheetRow[]): SheetRow[] {
+  // A job holding a row he typed: nothing is moved by itself (repair 2). His
+  // typed row may cover rooms that a suggested row also counts, and the app
+  // cannot tell which; the page shows what the walls need instead.
+  if (jobHasTypedRow(sheetRows)) return sheetRows;
   const bySize = suggestSheets(roomRows).bySize;
   const given = new Set<SheetSize>();
   return sheetRows.map((row) => {
@@ -920,6 +924,9 @@ export function applySuggestions(
   // until he converts every size at once (convertToNewRules). Adding a new
   // suggested row now would count a room twice (critic, BLOCKER-1).
   if (jobUnderEarlierRules(sheetRows)) return refreshSuggestedRows(nextRooms, sheetRows);
+  // A job holding a row he typed: no row is added or moved by itself
+  // (critic round 2, BLOCKER-2). See wallNeeds and addSuggestedSize.
+  if (jobHasTypedRow(sheetRows)) return sheetRows;
   const before = suggestSheets(prevRooms).bySize;
   const after = suggestSheets(nextRooms).bySize;
   const rows = [...sheetRows];
@@ -951,6 +958,59 @@ export function applySuggestions(
   );
 }
 
+/**
+ * True when the job holds a row he typed with sheets in it (a row with no
+ * mark, saved before update 1, counts as his). An empty row from "Add Sheet
+ * Row" does not count until he types a number into it.
+ */
+export function jobHasTypedRow(sheetRows: SheetRow[]): boolean {
+  return sheetRows.some((r) => r.sheetsSource !== "suggested" && r.sheetsNeeded > 0);
+}
+
+export interface WallNeed {
+  size: SheetSize;
+  /** What the walls need under the rules (rounded once per size). */
+  need: number;
+  /** What the sheet rows of this size hold now. */
+  have: number;
+  /** Of that, what he typed. */
+  typed: number;
+  /** No row of this size yet: "add N x size" can be offered. */
+  canAdd: boolean;
+}
+
+/**
+ * Size by size, what the walls need under the rules beside what the rows
+ * hold. Shown on a job where he typed his own counts, where nothing is added
+ * or moved by itself.
+ */
+export function wallNeeds(roomRows: RoomRow[], sheetRows: SheetRow[]): WallNeed[] {
+  const need = suggestSheets(roomRows).bySize;
+  return SHEET_SIZES.flatMap((size) => {
+    const mine = sheetRows.filter((r) => r.sheetSize === size);
+    const have = mine.reduce((sum, r) => sum + r.sheetsNeeded, 0);
+    const typed = mine.filter((r) => r.sheetsSource !== "suggested").reduce((sum, r) => sum + r.sheetsNeeded, 0);
+    if (!(need[size] > 0) && !(have > 0)) return [];
+    return [{ size, need: need[size], have, typed, canAdd: need[size] > 0 && mine.length === 0 }];
+  });
+}
+
+/**
+ * His one click: add a suggested row of this size with what the walls need
+ * (or bring his suggested row of that size to it). Typed rows are untouched.
+ */
+export function addSuggestedSize(roomRows: RoomRow[], sheetRows: SheetRow[], size: SheetSize): SheetRow[] {
+  const need = suggestSheets(roomRows).bySize[size];
+  const at = sheetRows.findIndex((r) => r.sheetSize === size && followsWalls(r));
+  if (at !== -1) return sheetRows.map((r, i) => (i === at ? { ...r, sheetsNeeded: need } : r));
+  const row: SheetRow = { sheetsNeeded: need, sheetSize: size, pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES };
+  const rows = [...sheetRows];
+  const bigger = rows.findIndex((r) => SHEET_SIZES.indexOf(r.sheetSize) > SHEET_SIZES.indexOf(size));
+  if (bigger === -1) rows.push(row);
+  else rows.splice(bigger, 0, row);
+  return rows;
+}
+
 /** True when any sheet row was suggested under the earlier rules. */
 export function jobUnderEarlierRules(sheetRows: SheetRow[]): boolean {
   return sheetRows.some(suggestedEarlier);
@@ -977,8 +1037,14 @@ function countsBySize(rows: SheetRow[]): Record<SheetSize, number> {
 export function convertToNewRules(
   roomRows: RoomRow[],
   sheetRows: SheetRow[],
-): { rows: SheetRow[]; changes: SizeChange[] } {
-  if (!jobUnderEarlierRules(sheetRows)) return { rows: sheetRows, changes: [] };
+): { rows: SheetRow[]; changes: SizeChange[]; typedKept: string[] } {
+  const typedKept = sheetRows
+    .filter((r) => r.sheetsSource !== "suggested" && r.sheetsNeeded > 0)
+    .map(
+      (r) =>
+        `Your ${r.sheetsNeeded} x ${r.sheetSize} stays as you typed it. The new rows may count the same walls: remove or change it yourself if they do.`,
+    );
+  if (!jobUnderEarlierRules(sheetRows)) return { rows: sheetRows, changes: [], typedKept: [] };
   const before = countsBySize(sheetRows);
   const bySize = suggestSheets(roomRows).bySize;
   const rows: SheetRow[] = sheetRows.map((r) => (suggestedEarlier(r) ? { ...r, rules: CURRENT_RULES } : r));
@@ -995,7 +1061,14 @@ export function convertToNewRules(
     if (bigger === -1) rows.push(row);
     else rows.splice(bigger, 0, row);
   }
-  const next = refreshSuggestedRows(roomRows, rows).filter(
+  const given = new Set<SheetSize>();
+  const refreshed = rows.map((row) => {
+    if (!followsWalls(row)) return row;
+    const count = given.has(row.sheetSize) ? 0 : bySize[row.sheetSize];
+    given.add(row.sheetSize);
+    return row.sheetsNeeded === count ? row : { ...row, sheetsNeeded: count };
+  });
+  const next = refreshed.filter(
     (r) => !(followsWalls(r) && r.sheetsNeeded === 0 && !(r.pricePerSheet > 0) && r.moldingCount == null),
   );
   const after = countsBySize(next);
@@ -1004,7 +1077,7 @@ export function convertToNewRules(
     before: before[size],
     after: after[size],
   }));
-  return { rows: next, changes };
+  return { rows: next, changes, typedKept };
 }
 
 /** What a room spec gives a new takeoff row. */

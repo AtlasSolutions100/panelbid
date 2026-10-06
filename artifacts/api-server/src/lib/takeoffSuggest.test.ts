@@ -252,8 +252,10 @@ describe("suggested sheet rows for the job", () => {
     expect(refreshSuggestedRows(rooms, old)).toEqual(old);
     const after = applySuggestions([], rooms, old);
     expect(after[0]).toEqual(old[0]);
-    // the 4x10 rooms have no row at all yet, so that suggestion is offered as its own row
-    expect(after[1]).toEqual({ sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES });
+    // Repair 2 (critic round 2, BLOCKER-2): while he has a typed row, no row of
+    // another size is added by itself (his typed row may cover those walls);
+    // the page shows what the walls need and offers "add 16 x 4x10".
+    expect(after).toEqual(old);
   });
 
   it("a suggested row he deleted does not come back until the suggestion itself changes", () => {
@@ -282,11 +284,22 @@ describe("suggested sheet rows for the job", () => {
   it("the server refreshes suggested rows from the rooms, so a stale count is never stored", () => {
     const stale: SheetRow[] = [
       { sheetsNeeded: 3, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
-      { sheetsNeeded: 7, sheetSize: "4x10", pricePerSheet: 50, sheetsSource: "typed" },
+      { sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 50, sheetsSource: "suggested", rules: CURRENT_RULES },
     ];
     expect(refreshSuggestedRows(rooms, stale)).toEqual([
       { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
-      { sheetsNeeded: 7, sheetSize: "4x10", pricePerSheet: 50, sheetsSource: "typed" },
+      { sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 50, sheetsSource: "suggested", rules: CURRENT_RULES },
     ]);
+  });
+
+  // Repair 2 (critic round 2, BLOCKER-2): this test used to have a typed 4x10
+  // row beside the stale suggested one, and the suggested one was refreshed.
+  // With a typed row in the job nothing moves by itself now.
+  it("beside a row he typed, the server moves nothing", () => {
+    const withTyped: SheetRow[] = [
+      { sheetsNeeded: 3, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
+      { sheetsNeeded: 7, sheetSize: "4x10", pricePerSheet: 50, sheetsSource: "typed" },
+    ];
+    expect(refreshSuggestedRows(rooms, withTyped)).toEqual(withTyped);
   });
 });

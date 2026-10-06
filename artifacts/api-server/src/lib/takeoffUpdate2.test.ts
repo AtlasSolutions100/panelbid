@@ -77,7 +77,7 @@ describe("each wall is rounded up before anything is added (answer 4)", () => {
     expect(roundWallUp(5)).toBe(6); // the reading built
   });
 
-  it("a 5 ft wall: 6 ft when walls go up to the next even foot (the other reading)", () => {
+  it("a 5 ft wall: 6 ft when walls go up to the next even foot (the reading built)", () => {
     expect(roundWallUp(5, 2)).toBe(6);
     // his own two examples fit this reading too
     expect(roundWallUp(7, 2)).toBe(8);
