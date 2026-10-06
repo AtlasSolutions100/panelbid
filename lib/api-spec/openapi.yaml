@@ -1298,6 +1298,18 @@ components:
         ceilingHeight:
           type: [string, "null"]
           description: The room's ceiling height. Used as the panel height, and marked "assumed to ceiling", when the room has no panel height
+        insideCorners:
+          type: [number, "null"]
+          description: Inside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)
+        outsideCorners:
+          type: [number, "null"]
+          description: Outside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)
+        fourByFour:
+          type: [boolean, "null"]
+          description: "4x4 panel ticked (true) or unticked (false) by hand. Null or absent: decided by the product name"
+        stackCourses:
+          type: [string, "null"]
+          description: The courses of a wall taller than 12 ft as typed, e.g. "10 + 4". Null or absent means the suggested stack
       required:
         [roomName, roomNumber, wallLengths, materialHeight, manufacturer, color, productCode, fireRating, moldingType]
     SheetsSource:
@@ -1320,6 +1332,14 @@ components:
         moldingCount:
           type: [number, "null"]
           description: Typed molding count for this row's molding length (the same number is kept on every row of that length). Null or absent means not typed
+        rules:
+          type: number
+          description: The rules a suggested row was made under (2 = update 2). A suggested row without it was made earlier and keeps its saved count
+        moldingCounts:
+          type: [object, "null"]
+          additionalProperties:
+            type: number
+          description: Typed molding counts by kind and length, e.g. {"cap-8":12}. The same on every row. Null or absent means none typed
       required: [sheetsNeeded, sheetSize, pricePerSheet]
     Takeoff:
       type: object

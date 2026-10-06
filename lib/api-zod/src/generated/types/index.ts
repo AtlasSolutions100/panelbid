@@ -47,6 +47,7 @@ export * from './takeoff';
 export * from './takeoffInput';
 export * from './takeoffRoomRow';
 export * from './takeoffSheetRow';
+export * from './takeoffSheetRowMoldingCounts';
 export * from './updateContractorSourceInput';
 export * from './updateExclusionTermInput';
 export * from './updateJobInput';

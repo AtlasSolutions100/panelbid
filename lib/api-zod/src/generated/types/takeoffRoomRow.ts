@@ -30,4 +30,24 @@ export interface TakeoffRoomRow {
      * @nullable
      */
   ceilingHeight?: string | null;
+  /**
+     * Inside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)
+     * @nullable
+     */
+  insideCorners?: number | null;
+  /**
+     * Outside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)
+     * @nullable
+     */
+  outsideCorners?: number | null;
+  /**
+     * 4x4 panel ticked (true) or unticked (false) by hand. Null or absent: decided by the product name
+     * @nullable
+     */
+  fourByFour?: boolean | null;
+  /**
+     * The courses of a wall taller than 12 ft as typed, e.g. "10 + 4". Null or absent means the suggested stack
+     * @nullable
+     */
+  stackCourses?: string | null;
 }

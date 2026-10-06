@@ -7,6 +7,7 @@
  */
 import type { SheetSize } from './sheetSize';
 import type { SheetsSource } from './sheetsSource';
+import type { TakeoffSheetRowMoldingCounts } from './takeoffSheetRowMoldingCounts';
 
 export interface TakeoffSheetRow {
   sheetsNeeded: number;
@@ -20,4 +21,11 @@ export interface TakeoffSheetRow {
      * @nullable
      */
   moldingCount?: number | null;
+  /** The rules a suggested row was made under (2 = update 2). A suggested row without it was made earlier and keeps its saved count */
+  rules?: number;
+  /**
+     * Typed molding counts by kind and length, e.g. {"cap-8":12}. The same on every row. Null or absent means none typed
+     * @nullable
+     */
+  moldingCounts?: TakeoffSheetRowMoldingCounts;
 }

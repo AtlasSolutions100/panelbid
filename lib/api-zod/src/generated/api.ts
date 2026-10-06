@@ -403,14 +403,20 @@ export const GetTakeoffResponse = zod.object({
   "productCode": zod.string().nullable(),
   "fireRating": zod.string().nullable(),
   "moldingType": zod.union([zod.enum(['aluminum', 'pvc']),zod.null()]),
-  "ceilingHeight": zod.string().nullish().describe('The room\'s ceiling height. Used as the panel height, and marked \"assumed to ceiling\", when the room has no panel height')
+  "ceilingHeight": zod.string().nullish().describe('The room\'s ceiling height. Used as the panel height, and marked \"assumed to ceiling\", when the room has no panel height'),
+  "insideCorners": zod.number().nullish().describe('Inside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)'),
+  "outsideCorners": zod.number().nullish().describe('Outside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)'),
+  "fourByFour": zod.boolean().nullish().describe('4x4 panel ticked (true) or unticked (false) by hand. Null or absent: decided by the product name'),
+  "stackCourses": zod.string().nullish().describe('The courses of a wall taller than 12 ft as typed, e.g. \"10 + 4\". Null or absent means the suggested stack')
 })),
   "sheetRows": zod.array(zod.object({
   "sheetsNeeded": zod.number(),
   "sheetSize": zod.enum(['4x4', '4x8', '4x10', '4x12']),
   "pricePerSheet": zod.number().describe('0 means no price has been typed (shown as \"not priced\")'),
   "sheetsSource": zod.enum(['suggested', 'typed']).optional().describe('suggested: the count follows the wall lengths. typed (or absent): the person\'s own count, never changed for them'),
-  "moldingCount": zod.number().nullish().describe('Typed molding count for this row\'s molding length (the same number is kept on every row of that length). Null or absent means not typed')
+  "moldingCount": zod.number().nullish().describe('Typed molding count for this row\'s molding length (the same number is kept on every row of that length). Null or absent means not typed'),
+  "rules": zod.number().optional().describe('The rules a suggested row was made under (2 = update 2). A suggested row without it was made earlier and keeps its saved count'),
+  "moldingCounts": zod.record(zod.string(), zod.number()).nullish().describe('Typed molding counts by kind and length, e.g. {\"cap-8\":12}. The same on every row. Null or absent means none typed')
 })),
   "priceSheetFileId": zod.number().nullable(),
   "laborRate": zod.number(),
@@ -445,14 +451,20 @@ export const SaveTakeoffBody = zod.object({
   "productCode": zod.string().nullable(),
   "fireRating": zod.string().nullable(),
   "moldingType": zod.union([zod.enum(['aluminum', 'pvc']),zod.null()]),
-  "ceilingHeight": zod.string().nullish().describe('The room\'s ceiling height. Used as the panel height, and marked \"assumed to ceiling\", when the room has no panel height')
+  "ceilingHeight": zod.string().nullish().describe('The room\'s ceiling height. Used as the panel height, and marked \"assumed to ceiling\", when the room has no panel height'),
+  "insideCorners": zod.number().nullish().describe('Inside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)'),
+  "outsideCorners": zod.number().nullish().describe('Outside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)'),
+  "fourByFour": zod.boolean().nullish().describe('4x4 panel ticked (true) or unticked (false) by hand. Null or absent: decided by the product name'),
+  "stackCourses": zod.string().nullish().describe('The courses of a wall taller than 12 ft as typed, e.g. \"10 + 4\". Null or absent means the suggested stack')
 })),
   "sheetRows": zod.array(zod.object({
   "sheetsNeeded": zod.number(),
   "sheetSize": zod.enum(['4x4', '4x8', '4x10', '4x12']),
   "pricePerSheet": zod.number().describe('0 means no price has been typed (shown as \"not priced\")'),
   "sheetsSource": zod.enum(['suggested', 'typed']).optional().describe('suggested: the count follows the wall lengths. typed (or absent): the person\'s own count, never changed for them'),
-  "moldingCount": zod.number().nullish().describe('Typed molding count for this row\'s molding length (the same number is kept on every row of that length). Null or absent means not typed')
+  "moldingCount": zod.number().nullish().describe('Typed molding count for this row\'s molding length (the same number is kept on every row of that length). Null or absent means not typed'),
+  "rules": zod.number().optional().describe('The rules a suggested row was made under (2 = update 2). A suggested row without it was made earlier and keeps its saved count'),
+  "moldingCounts": zod.record(zod.string(), zod.number()).nullish().describe('Typed molding counts by kind and length, e.g. {\"cap-8\":12}. The same on every row. Null or absent means none typed')
 })),
   "priceSheetFileId": zod.number().nullish(),
   "laborRate": zod.number(),
@@ -480,14 +492,20 @@ export const SaveTakeoffResponse = zod.object({
   "productCode": zod.string().nullable(),
   "fireRating": zod.string().nullable(),
   "moldingType": zod.union([zod.enum(['aluminum', 'pvc']),zod.null()]),
-  "ceilingHeight": zod.string().nullish().describe('The room\'s ceiling height. Used as the panel height, and marked \"assumed to ceiling\", when the room has no panel height')
+  "ceilingHeight": zod.string().nullish().describe('The room\'s ceiling height. Used as the panel height, and marked \"assumed to ceiling\", when the room has no panel height'),
+  "insideCorners": zod.number().nullish().describe('Inside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)'),
+  "outsideCorners": zod.number().nullish().describe('Outside corner molding pieces counted from the plans. Null or absent means none typed (never guessed)'),
+  "fourByFour": zod.boolean().nullish().describe('4x4 panel ticked (true) or unticked (false) by hand. Null or absent: decided by the product name'),
+  "stackCourses": zod.string().nullish().describe('The courses of a wall taller than 12 ft as typed, e.g. \"10 + 4\". Null or absent means the suggested stack')
 })),
   "sheetRows": zod.array(zod.object({
   "sheetsNeeded": zod.number(),
   "sheetSize": zod.enum(['4x4', '4x8', '4x10', '4x12']),
   "pricePerSheet": zod.number().describe('0 means no price has been typed (shown as \"not priced\")'),
   "sheetsSource": zod.enum(['suggested', 'typed']).optional().describe('suggested: the count follows the wall lengths. typed (or absent): the person\'s own count, never changed for them'),
-  "moldingCount": zod.number().nullish().describe('Typed molding count for this row\'s molding length (the same number is kept on every row of that length). Null or absent means not typed')
+  "moldingCount": zod.number().nullish().describe('Typed molding count for this row\'s molding length (the same number is kept on every row of that length). Null or absent means not typed'),
+  "rules": zod.number().optional().describe('The rules a suggested row was made under (2 = update 2). A suggested row without it was made earlier and keeps its saved count'),
+  "moldingCounts": zod.record(zod.string(), zod.number()).nullish().describe('Typed molding counts by kind and length, e.g. {\"cap-8\":12}. The same on every row. Null or absent means none typed')
 })),
   "priceSheetFileId": zod.number().nullable(),
   "laborRate": zod.number(),
