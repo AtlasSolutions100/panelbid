@@ -57,9 +57,11 @@ import {
   buildMaterialList,
   checkTakeoffNumbers,
   computeCosts,
+  convertToNewRules,
   flatProfitApplies,
   followsWalls,
   glueBuckets,
+  jobUnderEarlierRules,
   moldingsByKind,
   readSheetCount,
   refreshSuggestedRows,
@@ -607,6 +609,11 @@ export function TakeoffSection({
       ),
     )
 
+  // A job counted under the earlier rules keeps its counts until he converts
+  // every size at once; this is what that would change.
+  const earlierRules = jobUnderEarlierRules(sheetRows)
+  const conversion = useMemo(() => convertToNewRules(roomRows, sheetRows), [roomRows, sheetRows])
+
   // Moldings by kind and length (his rule) and glue buckets (his rule), with their working.
   const molding = useMemo(() => moldingsByKind(roomRows, sheetRows), [roomRows, sheetRows])
   const legacyLengths = new Set(molding.legacy.map((l) => l.lengthFt))
@@ -795,6 +802,11 @@ export function TakeoffSection({
           <p className="text-xs mt-1 text-amber-700" data-testid="text-rounding-rule">
             {wallRoundingWords()}
           </p>
+          {earlierRules && (
+            <p className="text-xs mt-1 font-medium text-amber-800" data-testid="text-rooms-not-counted-yet">
+              This job was counted under the earlier rules: changes to the rooms below are not counted in the sheet rows until you press "Use the new counts" under Materials.
+            </p>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -887,6 +899,9 @@ export function TakeoffSection({
                         <div className="text-[10px] text-muted-foreground">{rs.arithmetic}</div>
                         {rs.parts.some((p) => p.sheets % 1 !== 0) && (
                           <div className="text-[10px] text-muted-foreground">rounded up with the job's other sheets of that size</div>
+                        )}
+                        {rs.readingNote && (
+                          <div className="mt-0.5 text-[10px] font-medium text-amber-700" data-testid={`text-reading-note-${i}`}>{rs.readingNote}</div>
                         )}
                         {rs.assumed.map((a) => (
                           <div key={a} className="mt-0.5 text-[10px] font-medium text-amber-700" data-testid={`text-room-assumed-${i}`}>{a}</div>
@@ -1135,6 +1150,27 @@ export function TakeoffSection({
             </div>
           </div>
         )}
+        {earlierRules && (
+          <div className="mx-4 mb-2 rounded-md border border-amber-400 bg-amber-50/70 p-3 text-xs" data-testid="box-earlier-rules">
+            <p className="font-medium text-amber-900">
+              This job was counted under the earlier rules. Its sheet counts stay exactly as they were saved, and changes to the rooms are not counted yet.
+            </p>
+            <p className="mt-1 text-amber-900" data-testid="text-new-counts-preview">
+              {conversion.changes.length > 0
+                ? `The new rules would change: ${conversion.changes.map((c) => `${c.size} ${c.before} → ${c.after}`).join("; ")}. Rows you typed stay yours.`
+                : "The new rules give the same counts. Rows you typed stay yours."}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 h-7 text-xs"
+              onClick={() => setSheetRows(tidyMoldingCounts(convertToNewRules(roomRows, sheetRows).rows))}
+              data-testid="button-use-new-counts"
+            >
+              Use the new counts for every size
+            </Button>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -1182,6 +1218,8 @@ export function TakeoffSection({
                       </div>
                     )}
                     {!followsWalls(row) &&
+                      !suggestedEarlier(row) &&
+                      !earlierRules &&
                       suggestion.bySize[row.sheetSize] > 0 &&
                       !sheetRows.some((r) => followsWalls(r) && r.sheetSize === row.sheetSize) && (
                         <button
@@ -1190,7 +1228,7 @@ export function TakeoffSection({
                           onClick={() => updateSheetRow(i, { sheetsNeeded: suggestion.bySize[row.sheetSize], sheetsSource: "suggested", rules: CURRENT_RULES })}
                           data-testid={`button-use-suggestion-${i}`}
                         >
-                          {suggestedEarlier(row) ? "use the new count" : `wall lengths suggest ${suggestion.bySize[row.sheetSize]}: use that`}
+                          wall lengths suggest {suggestion.bySize[row.sheetSize]}: use that
                         </button>
                       )}
                   </td>

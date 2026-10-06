@@ -189,6 +189,7 @@ export function MaterialListDialog({
                     <td className={`${td} text-xs text-muted-foreground`}>
                       {r.wallWorking && <div>{r.wallWorking}</div>}
                       <div>{r.sheets !== null ? r.arithmetic : r.problem}</div>
+                      {r.readingNote && <div className="text-amber-700 font-medium">{r.readingNote}</div>}
                     </td>
                   </tr>
                 ))}
