@@ -602,7 +602,7 @@ export const GenerateProposalParams = zod.object({
 })
 
 export const GenerateProposalBody = zod.object({
-  "confirmCounts": zod.boolean().optional().describe('He has seen the sizes whose rows hold more or fewer sheets than the walls need, and makes the proposal anyway. For this one request only')
+  "confirmCounts": zod.string().optional().describe('The fingerprint of the list he was shown (sizes whose rows hold more or fewer sheets than the walls need). The proposal is made only when it still matches the rows; for this one request only')
 })
 
 export const GenerateProposalResponse = zod.object({

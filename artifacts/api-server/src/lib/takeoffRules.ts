@@ -1026,11 +1026,73 @@ export interface CountDifference {
  * server refuses a proposal without that confirmation while any is listed.
  */
 export function countDifferences(roomRows: RoomRow[], sheetRows: SheetRow[]): CountDifference[] {
-  const need = suggestSheets(roomRows).bySize;
-  return SHEET_SIZES.flatMap((size) => {
-    const have = sheetRows.filter((r) => r.sheetSize === size).reduce((sum, r) => sum + r.sheetsNeeded, 0);
-    return have === need[size] ? [] : [{ size, need: need[size], have }];
-  });
+  return countCheck(roomRows, sheetRows).differences;
+}
+
+export interface CountCheck {
+  /** Sizes whose rows differ from what the measured walls need. */
+  differences: CountDifference[];
+  /** The same in words. */
+  words: string[];
+  /** Rooms with something typed but no wall length or no usable height. */
+  uncountedRooms: number;
+  /** False when no room can be counted: the counts are not checked at all. */
+  checked: boolean;
+  /** What was not checked, in words, or null. */
+  note: string | null;
+  /** What he is shown, in one string: a confirmation covers only this. */
+  fingerprint: string;
+}
+
+function roomSaid(row: RoomRow): boolean {
+  return [row.roomName, row.roomNumber, row.wallLengths, row.materialHeight, row.ceilingHeight].some(
+    (v) => (v ?? "").trim() !== "",
+  );
+}
+
+/**
+ * The proposal's count check (repairs 3 and 4). Only rooms with a wall
+ * length and a usable height are compared. A size that no counted room needs
+ * is not called "the walls need 0" when an uncounted room might use it (its
+ * size is unknown, or is that size). A job where no room can be counted is
+ * not checked: he is typing the counts by hand.
+ */
+export function countCheck(roomRows: RoomRow[], sheetRows: SheetRow[]): CountCheck {
+  const said = roomRows.filter(roomSaid);
+  const job = suggestSheets(said);
+  const uncounted = job.rooms.filter((r) => r.sheets === null);
+  const checked = uncounted.length < job.rooms.length;
+  const uncountedSizes = new Set(uncounted.map((r) => r.sheetSize));
+  const differences: CountDifference[] = !checked
+    ? []
+    : SHEET_SIZES.flatMap((size) => {
+        const need = job.bySize[size];
+        const have = sheetRows.filter((r) => r.sheetSize === size).reduce((sum, r) => sum + r.sheetsNeeded, 0);
+        if (have === need) return [];
+        // Not measured: an uncounted room may be what these rows are for.
+        if (need === 0 && (uncountedSizes.has(size) || uncountedSizes.has(null))) return [];
+        return [{ size, need, have }];
+      });
+  const words = countDifferenceWords(differences);
+  const n = uncounted.length;
+  const note = !checked
+    ? job.rooms.length > 0 || sheetRows.some((r) => r.sheetsNeeded > 0)
+      ? "No room has both a wall length and a height, so the sheet counts are not checked against the walls."
+      : null
+    : n > 0
+      ? `${n} room${n === 1 ? " has" : "s have"} no wall length or height, so ${n === 1 ? "it is" : "they are"} not checked.`
+      : null;
+  const held = SHEET_SIZES.map(
+    (size) => `${size}=${sheetRows.filter((r) => r.sheetSize === size).reduce((sum, r) => sum + r.sheetsNeeded, 0)}`,
+  ).join(",");
+  return {
+    differences,
+    words,
+    uncountedRooms: n,
+    checked,
+    note,
+    fingerprint: `rows:${held}|seen:${words.join(";")}`,
+  };
 }
 
 /** "4x12: the walls need 0, your rows hold 12". */

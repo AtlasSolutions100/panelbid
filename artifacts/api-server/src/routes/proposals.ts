@@ -25,8 +25,7 @@ import {
 } from "../lib/proposalRules";
 import {
   amountInWords,
-  countDifferenceWords,
-  countDifferences,
+  countCheck,
   refreshSuggestedRows,
   roundToCents,
 } from "../lib/takeoffRules";
@@ -114,17 +113,23 @@ router.post(
       return;
     }
 
-    // Repair 3: sizes whose rows hold more or fewer sheets than the walls need
-    // are listed, and nothing is printed until he confirms, for this request
-    // only (a direct call cannot skip it either).
+    // Repairs 3 and 4: sizes whose rows hold more or fewer sheets than the
+    // measured walls need are listed, and nothing is printed until he
+    // confirms. The confirmation is the fingerprint of the list he was shown:
+    // if the rows changed since (another person saved, a stale page), he is
+    // shown the new list instead. A direct call cannot skip it either.
     const body = GenerateProposalBody.safeParse(req.body ?? {});
-    const confirmed = body.success && body.data.confirmCounts === true;
-    const differences = countDifferenceWords(countDifferences(takeoff.roomRows, takeoff.sheetRows));
-    if (differences.length > 0 && !confirmed) {
+    const sent = body.success ? body.data.confirmCounts : undefined;
+    const check = countCheck(takeoff.roomRows, takeoff.sheetRows);
+    if (check.words.length > 0 && sent !== check.fingerprint) {
+      const changed = typeof sent === "string" && sent !== "";
       res.status(409).json({
         code: "counts_differ",
-        message: `The sheet rows do not match what the walls need: ${differences.join("; ")}. Check the takeoff, or confirm to make the proposal with the rows as they are.`,
-        differences,
+        changed,
+        message: `${changed ? "The takeoff changed after you looked at the list. " : ""}The sheet rows do not match what the walls need: ${check.words.join("; ")}.${check.note ? ` ${check.note}` : ""} Check the takeoff, or confirm to make the proposal with the rows as they are.`,
+        differences: check.words,
+        note: check.note,
+        fingerprint: check.fingerprint,
       });
       return;
     }

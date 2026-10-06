@@ -302,8 +302,10 @@ describe("no negative money or quantity is stored", () => {
     expect(saved.json?.totalPrice).toBe(0);
     // a proposal whose price box was emptied is saved with no price and no words
     // Repair 3: this takeoff's rows are not what its walls need, so the
-    // proposal needs his confirmation (not what this test is about).
-    await send("POST", "/proposal/generate", { confirmCounts: true });
+    // proposal needs his confirmation (not what this test is about). Repair 4:
+    // the confirmation is the fingerprint of the list he was shown.
+    const stop = await send("POST", "/proposal/generate");
+    await send("POST", "/proposal/generate", { confirmCounts: stop.json?.fingerprint });
     await send("PATCH", "/proposal", { priceAmount: 4100 });
     const emptied = await send("PATCH", "/proposal", { priceAmount: 0 });
     expect(emptied.status).toBe(200);
@@ -339,7 +341,8 @@ describe("repair 3: suggested rows follow the walls, and a proposal asks before 
     expect(refused.json?.differences).toEqual(["4x12: the walls need 0, your rows hold 12"]);
     expect(memory.proposal).toBeNull();
 
-    const made = await send("POST", "/proposal/generate", { confirmCounts: true });
+    // Repair 4: he confirms the list he was shown (its fingerprint)
+    const made = await send("POST", "/proposal/generate", { confirmCounts: refused.json?.fingerprint });
     expect(made.status).toBe(200);
     expect(made.json?.frp).toContain("An allotment of 9 4x8, 6 4x10 and 12 4x12 sheets only.");
 
@@ -351,5 +354,60 @@ describe("repair 3: suggested rows follow the walls, and a proposal asks before 
     await send("PUT", "/takeoff", takeoff());
     const made = await send("POST", "/proposal/generate");
     expect(made.status).toBe(200);
+  });
+});
+
+describe("repair 4: the stop checks only measured walls, and a confirmation covers only what he saw", () => {
+  it("a job typed by hand with no wall lengths makes its proposal with no stop (MAJOR-R4-1)", async () => {
+    await send("PUT", "/takeoff", takeoff({
+      roomRows: [room({ roomName: "Kitchen", roomNumber: "101", materialHeight: "8'-0\"" })],
+      sheetRows: [{ sheetsNeeded: 12, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "typed" }],
+    }));
+    const made = await send("POST", "/proposal/generate");
+    expect(made.status).toBe(200);
+    expect(made.json?.frp).toContain("An allotment of 12 4x8 sheets only.");
+  });
+
+  it("two people: Mike saves 20 x 4x12 between Ryan's stop and his confirm; Ryan is stopped again with the new list (MAJOR-R4-2)", async () => {
+    const ryanRows = [
+      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "suggested" },
+      { sheetsNeeded: 7, sheetSize: "4x10", pricePerSheet: 58.25, sheetsSource: "typed" },
+    ];
+    await send("PUT", "/takeoff", takeoff({ sheetRows: ryanRows }));
+    const ryanStop = await send("POST", "/proposal/generate");
+    expect(ryanStop.status).toBe(409);
+    expect(ryanStop.json?.differences).toEqual(["4x10: the walls need 6, your rows hold 7"]);
+    const seen = ryanStop.json?.fingerprint as string;
+    expect(typeof seen).toBe("string");
+
+    // Mike saves the same job with an extra 20 x 4x12
+    await send("PUT", "/takeoff", takeoff({
+      sheetRows: [...ryanRows, { sheetsNeeded: 20, sheetSize: "4x12", pricePerSheet: 50, sheetsSource: "typed" }],
+    }));
+
+    // Ryan presses "Make the proposal with these rows" with what he saw
+    const again = await send("POST", "/proposal/generate", { confirmCounts: seen });
+    expect(again.status).toBe(409);
+    expect(again.json?.code).toBe("counts_differ");
+    expect(again.json?.changed).toBe(true);
+    expect(again.json?.differences).toEqual([
+      "4x10: the walls need 6, your rows hold 7",
+      "4x12: the walls need 0, your rows hold 20",
+    ]);
+    expect(memory.proposal).toBeNull();
+
+    // confirming the list he now sees makes it
+    const made = await send("POST", "/proposal/generate", { confirmCounts: again.json?.fingerprint });
+    expect(made.status).toBe(200);
+    expect(made.json?.frp).toContain("An allotment of 9 4x8, 7 4x10 and 20 4x12 sheets only.");
+  });
+
+  it("a blanket yes is not a confirmation", async () => {
+    await send("PUT", "/takeoff", takeoff({
+      sheetRows: [{ sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "typed" }],
+    }));
+    const reply = await send("POST", "/proposal/generate", { confirmCounts: true });
+    expect(reply.status).toBe(409);
+    expect(memory.proposal).toBeNull();
   });
 });
