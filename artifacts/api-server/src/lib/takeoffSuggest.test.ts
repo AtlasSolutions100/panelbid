@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  CURRENT_RULES,
   applySuggestions,
   draftRoomRows,
   linearFootage,
@@ -143,75 +144,56 @@ describe("sheet size for a panel height", () => {
 });
 
 describe("suggested sheets for a room", () => {
-  it("is the wall length divided by the 4 ft sheet width, rounded up", () => {
+  // Update 2 (his answer 4): each wall is rounded up to the next 4 ft first,
+  // and a room is no longer rounded on its own (the job rounds once per size).
+  it("is the counted wall divided by the 4 ft sheet width", () => {
     const s = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "9'" }));
-    expect(s.sheets).toBe(9); // 34 / 4 = 8.5
+    expect(s.sheets).toBe(9); // 12 + 12 + 12 = 36 / 4
     expect(s.sheetSize).toBe("4x10");
-    expect(s.arithmetic).toBe("34 ft of wall ÷ 4 ft a sheet = 8.5, rounded up to 9 sheets of 4x10");
+    expect(s.wallWorking).toBe("12 ft + 12 ft + 10 ft counted as 12 ft = 36 ft");
+    expect(s.arithmetic).toBe("36 ft ÷ 4 ft a sheet = 9 sheets of 4x10");
   });
 
-  it("an exact fit is not rounded up", () => {
+  it("an exact fit stays as it is", () => {
     const s = suggestRoom(room({ wallLengths: "8 + 8 + 8 + 8", materialHeight: "8'-0\"" }));
     expect(s.sheets).toBe(8);
     expect(s.sheetSize).toBe("4x8");
-    expect(s.arithmetic).toBe("32 ft of wall ÷ 4 ft a sheet = 8 sheets of 4x8");
-    expect(suggestRoom(room({ wallLengths: "5'-4\" + 5'-4\" + 5'-4\"", materialHeight: "8" })).sheets).toBe(4);
+    expect(s.arithmetic).toBe("32 ft ÷ 4 ft a sheet = 8 sheets of 4x8");
+    // three walls of 5'-4" each count as 8 ft
+    expect(suggestRoom(room({ wallLengths: "5'-4\" + 5'-4\" + 5'-4\"", materialHeight: "8" })).sheets).toBe(6);
   });
 
   it("adds no waste and takes out no openings: the walls are measured through doors and windows", () => {
     // 40 ft of wall is 10 sheets whatever doors are in it; nothing is added on top
     expect(suggestRoom(room({ wallLengths: "40", materialHeight: "8" })).sheets).toBe(10);
+    // 40.5 ft as one wall counts as 44 ft
     expect(suggestRoom(room({ wallLengths: "40.5", materialHeight: "8" })).sheets).toBe(11);
   });
 
   it("uses the ceiling height when there is no panel height", () => {
-    const s = suggestRoom(room({ wallLengths: "10 + 10", ceilingHeight: "10'-0\"" }));
-    expect(s.sheets).toBe(5);
+    const s = suggestRoom(room({ wallLengths: "12 + 12", ceilingHeight: "10'-0\"" }));
+    expect(s.sheets).toBe(6);
     expect(s.sheetSize).toBe("4x10");
     expect(s.height.assumed).toBe(true);
   });
 
-  it("flags a panel taller than his longest sheet instead of quietly counting one row of sheets", () => {
+  it("a panel taller than his longest sheet is never counted as one row of sheets", () => {
+    // on its own (no other sheet size on the job) it asks for the courses
     const tall = suggestRoom(room({ wallLengths: "40", ceilingHeight: "14'-0\"" }));
-    expect(tall.sheets).toBe(10);
-    expect(tall.sheetSize).toBe("4x12");
-    expect(tall.warning).toMatch(/14 ft.*taller than a 12 ft sheet/);
-    expect(suggestRoom(room({ wallLengths: "40", materialHeight: "12'" })).warning).toBeNull();
-    expect(suggestRoom(room({ wallLengths: "40", materialHeight: "8'" })).warning).toBeNull();
+    expect(tall.sheets).toBeNull();
+    expect(tall.problem).toMatch(/14 ft.*taller than a 12 ft sheet/);
+    expect(suggestRoom(room({ wallLengths: "40", materialHeight: "12'" })).problem).toBeNull();
   });
 
-  it("flags a panel of 4 ft or less: a 4x8 cut in half covers 8 ft of wall, so the count may be about half", () => {
-    // 34 ft of wall. The count is NOT changed (he has not given his rule): it is flagged.
-    const four = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "4'" }));
-    expect(four.sheets).toBe(9);
-    expect(four.sheetSize).toBe("4x8");
-    expect(four.arithmetic).toBe("34 ft of wall ÷ 4 ft a sheet = 8.5, rounded up to 9 sheets of 4x8");
-    expect(four.warning).toBe(
-      "the panel is 4 ft high: this counts one full 4x8 for every 4 ft of wall, " +
-        "but one 4x8 cut in half covers 8 ft of wall, so the true count may be about half: tell us your rule",
-    );
-    // 48 inches is the same panel
-    const inches = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: '48"' }));
-    expect(inches.sheets).toBe(9);
-    expect(inches.warning).toBe(four.warning);
-    // lower still (3'-8"), and a 4 ft height that came from the ceiling box
-    expect(suggestRoom(room({ wallLengths: "34", materialHeight: "3'-8\"" })).warning).toMatch(
-      /^the panel is 3 ft 8 in high: .*may be about half: tell us your rule$/,
-    );
-    expect(suggestRoom(room({ wallLengths: "34", ceilingHeight: "4'-0\"" })).warning).toBe(four.warning);
-  });
-
-  it("does not flag a panel above 4 ft: 4.01 ft and 8 ft read as before", () => {
+  it("a panel above 4 ft is an upright sheet: 4.01 ft and 8 ft", () => {
     const justOver = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "4.01" }));
     expect(justOver.sheets).toBe(9);
     expect(justOver.sheetSize).toBe("4x8");
-    expect(justOver.warning).toBeNull();
-    expect(suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "4'-0 1/2\"" })).warning).toBeNull();
+    expect(justOver.layout).toBe("upright");
+    expect(suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "4'-0 1/2\"" })).layout).toBe("upright");
     const eight = suggestRoom(room({ wallLengths: "12 + 12 + 10", materialHeight: "8'" }));
     expect(eight.sheets).toBe(9);
     expect(eight.warning).toBeNull();
-    // and the taller-than-12-ft warning is still its own line
-    expect(suggestRoom(room({ wallLengths: "40", ceilingHeight: "14'-0\"" })).warning).toMatch(/taller than a 12 ft sheet/);
   });
 
   it("suggests nothing, and says why, without a wall length or a height", () => {
@@ -228,12 +210,12 @@ describe("suggested sheets for a room", () => {
 
 describe("suggested sheet rows for the job", () => {
   const rooms: RoomRow[] = [
-    room({ roomName: "Kitchen", wallLengths: "12 + 12 + 10", materialHeight: "8'" }), // 34 ft -> 9 x 4x8
-    room({ roomName: "Prep", wallLengths: "10 + 10 + 10 + 10", materialHeight: "9'" }), // 40 ft -> 10 x 4x10
-    room({ roomName: "Restroom", wallLengths: "6 + 6 + 5 + 5", ceilingHeight: "10'" }), // 22 ft -> 6 x 4x10, assumed
+    room({ roomName: "Kitchen", wallLengths: "12 + 12 + 10", materialHeight: "8'" }), // 12 + 12 + 12 = 36 ft -> 9 x 4x8
+    room({ roomName: "Prep", wallLengths: "12 + 12 + 8 + 8", materialHeight: "9'" }), // 40 ft -> 10 x 4x10 (10 + 10 + 10 + 10 would now count as 48 ft)
+    room({ roomName: "Restroom", wallLengths: "8 + 8 + 4 + 4", ceilingHeight: "10'" }), // 24 ft -> 6 x 4x10, assumed
   ];
 
-  it("adds the rooms up by sheet size (each room rounded up on its own)", () => {
+  it("adds the rooms up by sheet size (rounded up once per size)", () => {
     const s = suggestSheets(rooms);
     expect(s.bySize).toEqual({ "4x4": 0, "4x8": 9, "4x10": 16, "4x12": 0 });
     expect(s.rooms.map((r) => r.sheets)).toEqual([9, 10, 6]);
@@ -241,15 +223,15 @@ describe("suggested sheet rows for the job", () => {
 
   it("fills empty sheet rows with the suggestion, marked as suggested", () => {
     expect(applySuggestions([], rooms, [])).toEqual([
-      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested" },
-      { sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "suggested" },
+      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
+      { sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
     ]);
   });
 
   it("a suggested row follows the wall lengths", () => {
     const rows = applySuggestions([], rooms, []);
     const longer = rooms.map((r, i) => (i === 0 ? { ...r, wallLengths: "12 + 12 + 10 + 10" } : r));
-    expect(applySuggestions(rooms, longer, rows)[0]).toMatchObject({ sheetsNeeded: 11, sheetsSource: "suggested" });
+    expect(applySuggestions(rooms, longer, rows)[0]).toMatchObject({ sheetsNeeded: 12, sheetsSource: "suggested", rules: CURRENT_RULES });
   });
 
   it("a row he typed over is never changed behind his back", () => {
@@ -257,7 +239,7 @@ describe("suggested sheet rows for the job", () => {
     rows[0] = { ...rows[0]!, sheetsNeeded: 12, sheetsSource: "typed" };
     const longer = rooms.map((r, i) => (i === 0 ? { ...r, wallLengths: "12 + 12 + 10 + 10" } : r));
     const after = applySuggestions(rooms, longer, rows);
-    expect(after[0]).toEqual({ sheetsNeeded: 12, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "typed" });
+    expect(after[0]).toMatchObject({ sheetsNeeded: 12, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "typed" });
     expect(after).toHaveLength(2); // and no second 4x8 row is slipped in beside his
     expect(refreshSuggestedRows(longer, rows)[0]).toMatchObject({ sheetsNeeded: 12, sheetsSource: "typed" });
   });
@@ -268,7 +250,7 @@ describe("suggested sheet rows for the job", () => {
     const after = applySuggestions([], rooms, old);
     expect(after[0]).toEqual(old[0]);
     // the 4x10 rooms have no row at all yet, so that suggestion is offered as its own row
-    expect(after[1]).toEqual({ sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "suggested" });
+    expect(after[1]).toEqual({ sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES });
   });
 
   it("a suggested row he deleted does not come back until the suggestion itself changes", () => {
@@ -281,7 +263,7 @@ describe("suggested sheet rows for the job", () => {
     const only10 = applySuggestions([], rooms, []).filter((r) => r.sheetSize !== "4x8");
     const longer = rooms.map((r, i) => (i === 0 ? { ...r, wallLengths: "12 + 12 + 10 + 10" } : r));
     expect(applySuggestions(rooms, longer, only10).map((r) => r.sheetsNeeded + " " + r.sheetSize)).toEqual([
-      "11 4x8",
+      "12 4x8",
       "16 4x10",
     ]);
   });
@@ -290,17 +272,17 @@ describe("suggested sheet rows for the job", () => {
     const rows = applySuggestions([], rooms, []);
     const fewer = rooms.slice(1);
     expect(applySuggestions(rooms, fewer, rows)).toEqual([
-      { sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "suggested" },
+      { sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
     ]);
   });
 
   it("the server refreshes suggested rows from the rooms, so a stale count is never stored", () => {
     const stale: SheetRow[] = [
-      { sheetsNeeded: 3, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested" },
+      { sheetsNeeded: 3, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
       { sheetsNeeded: 7, sheetSize: "4x10", pricePerSheet: 50, sheetsSource: "typed" },
     ];
     expect(refreshSuggestedRows(rooms, stale)).toEqual([
-      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested" },
+      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
       { sheetsNeeded: 7, sheetSize: "4x10", pricePerSheet: 50, sheetsSource: "typed" },
     ]);
   });

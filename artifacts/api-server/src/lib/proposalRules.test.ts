@@ -20,7 +20,7 @@ import {
   type ProposalTakeoff,
   type RoomTexture,
 } from "./proposalRules";
-import { applySuggestions, type RoomRow } from "./takeoffRules";
+import { CURRENT_RULES, applySuggestions, type RoomRow } from "./takeoffRules";
 
 const room = (over: Partial<RoomRow> = {}): RoomRow => ({
   roomName: "Kitchen",
@@ -223,15 +223,18 @@ describe("regenerating a proposal", () => {
 
 describe("new sheet counts never go out under a price set for other counts", () => {
   // The checker's scenario: 9 x 4x8 and 6 x 4x10, priced, give $3,799.00.
+  // Update 2: each wall now counts up to the next 4 ft, so the restroom's
+  // walls are 8 + 8 + 4 + 4 (24 ft, 6 sheets) to keep the checker's counts,
+  // and the suggested rows carry the rules they were made under.
   const rooms: RoomRow[] = [
     room({ wallLengths: "12 + 12 + 10", materialHeight: "8'-0\"" }),
-    restroom({ wallLengths: "6 + 6 + 5'-6\" + 5'-6\"", materialHeight: null, ceilingHeight: "10'-0\"" }),
+    restroom({ wallLengths: "8 + 8 + 4 + 4", materialHeight: null, ceilingHeight: "10'-0\"" }),
   ];
   const priced = takeoff({
     roomRows: rooms,
     sheetRows: [
-      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "suggested" },
-      { sheetsNeeded: 6, sheetSize: "4x10", pricePerSheet: 58.25, sheetsSource: "suggested" },
+      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "suggested", rules: CURRENT_RULES },
+      { sheetsNeeded: 6, sheetSize: "4x10", pricePerSheet: 58.25, sheetsSource: "suggested", rules: CURRENT_RULES },
     ],
     laborRate: 65,
     laborDays: 2,
@@ -259,9 +262,9 @@ describe("new sheet counts never go out under a price set for other counts", () 
     expect(first.priceAmount).toBe(3799);
     expect(first.priceInWords).toBe("Three Thousand Seven Hundred Ninety-Nine Dollars");
     expect(unpriced.sheetRows).toEqual([
-      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "suggested" },
-      { sheetsNeeded: 0, sheetSize: "4x10", pricePerSheet: 58.25, sheetsSource: "suggested" },
-      { sheetsNeeded: 6, sheetSize: "4x12", pricePerSheet: 0, sheetsSource: "suggested" },
+      { sheetsNeeded: 9, sheetSize: "4x8", pricePerSheet: 45.5, sheetsSource: "suggested", rules: CURRENT_RULES },
+      { sheetsNeeded: 0, sheetSize: "4x10", pricePerSheet: 58.25, sheetsSource: "suggested", rules: CURRENT_RULES },
+      { sheetsNeeded: 6, sheetSize: "4x12", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
     ]);
     expect(priceFromTakeoff(unpriced)).toBeNull();
   });

@@ -6,15 +6,19 @@
  */
 import {
   GLUE_SHEETS_PER_BUCKET,
-  LONGEST_SHEET_FT,
+  MOLDING_KIND_NAMES,
+  MOLDING_PER_SHEET_ASSUMED,
   SHEET_SIZES,
   feetText,
+  followsWalls,
   glueBuckets,
-  isSuggested,
-  moldingLines,
+  moldingsByKind,
   roomLabel,
   suggestSheets,
-  type MoldingLine,
+  suggestedEarlier,
+  wallRoundingWords,
+  type KindLine,
+  type LegacyMoldingLine,
   type RoomRow,
   type SheetRow,
   type SheetSize,
@@ -34,8 +38,11 @@ export interface MaterialListInput {
 export interface MaterialSheetLine {
   size: SheetSize;
   count: number;
-  /** Whose count it is. */
-  whose: "suggested" | "yours" | "both";
+  /**
+   * Whose count it is. "earlier": suggested under the rules before update 2,
+   * kept as it was saved.
+   */
+  whose: "suggested" | "yours" | "both" | "earlier";
   /** What the wall lengths suggest for this size. */
   suggested: number;
   /** Price per sheet when he typed one price for this size, else null. */
@@ -49,10 +56,15 @@ export interface MaterialRoomLine {
   /** Wall lengths exactly as typed. */
   wallText: string;
   wallFeet: number;
+  /** The walls as counted: "7 ft counted as 8 ft + 3 ft counted as 4 ft = 12 ft". */
+  wallWorking: string;
   /** "8 ft", "10 ft (assumed to ceiling)", or what is missing. */
   heightText: string;
+  /** The room's sheets (not rounded: the job rounds once per size). */
   sheets: number | null;
   sheetSize: SheetSize | null;
+  /** The sheets in words: "1.5 × 4x8 on its side", "4 × 4x10 + 2 × 4x8 on its side". */
+  sheetsText: string;
   /** The working, in words. Empty when there is no suggestion. */
   arithmetic: string;
   /** Why the room has no suggested count. Null when it has one. */
@@ -67,12 +79,17 @@ export interface MaterialList {
   thickness: string | null;
   sheets: MaterialSheetLine[];
   totalSheets: number;
-  moldings: MoldingLine[];
+  /** The job's rounding per size, in words ("4x8: 1.5 + 1.5 = 3 sheets"). */
+  sizeWorking: string[];
+  /** Moldings by kind and length, with a count. */
+  moldings: KindLine[];
+  /** Counts typed per length before update 2 (all kinds), kept as his. */
+  legacyMoldings: LegacyMoldingLine[];
   glue: { buckets: number; arithmetic: string };
   rooms: MaterialRoomLine[];
   /** Every assumption behind the numbers, in plain words. */
   assumptions: string[];
-  /** Rooms that are not in the suggested count, and why. */
+  /** Rooms (or moldings) that are not in the suggested count, and why. */
   notCounted: string[];
   /** True only when he typed at least one sheet price. */
   showPrices: boolean;
@@ -86,6 +103,15 @@ function said(row: RoomRow): boolean {
   );
 }
 
+const num = (n: number) => String(Number(n.toFixed(2)));
+
+/** A room's sheets in words. */
+export function roomSheetsText(parts: { size: SheetSize; onSide: boolean; sheets: number }[]): string {
+  return parts
+    .map((p) => `${num(p.sheets)} × ${p.size}${p.onSide ? " on its side" : ""}`)
+    .join(" + ");
+}
+
 export function buildMaterialList(input: MaterialListInput): MaterialList {
   const roomRows = input.roomRows.filter(said);
   const suggestion = suggestSheets(roomRows);
@@ -96,14 +122,16 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
     const mine = input.sheetRows.filter((r) => r.sheetSize === size && r.sheetsNeeded > 0);
     if (mine.length === 0) continue;
     const count = mine.reduce((sum, r) => sum + r.sheetsNeeded, 0);
-    const anySuggested = mine.some(isSuggested);
-    const anyTyped = mine.some((r) => !isSuggested(r));
+    const anyFollowing = mine.some(followsWalls);
+    const anyEarlier = mine.some(suggestedEarlier);
+    const anyTyped = mine.some((r) => r.sheetsSource !== "suggested");
     const prices = [...new Set(mine.map((r) => r.pricePerSheet))];
     const allPriced = mine.every((r) => r.pricePerSheet > 0);
+    const kinds = [anyFollowing, anyEarlier, anyTyped].filter(Boolean).length;
     sheets.push({
       size,
       count,
-      whose: anySuggested && anyTyped ? "both" : anySuggested ? "suggested" : "yours",
+      whose: kinds > 1 ? "both" : anyFollowing ? "suggested" : anyEarlier ? "earlier" : "yours",
       suggested: suggestion.bySize[size],
       price: allPriced && prices.length === 1 ? prices[0]! : null,
       total: allPriced ? mine.reduce((sum, r) => sum + r.sheetsNeeded * r.pricePerSheet, 0) : null,
@@ -115,9 +143,16 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
     sheets.length > 0 && sheets.every((s) => s.total !== null)
       ? sheets.reduce((sum, s) => sum + (s.total ?? 0), 0)
       : null;
+  const sizeWorking = SHEET_SIZES.map((size) => suggestion.sizeWorking[size]).filter(
+    (w): w is string => !!w,
+  );
 
   // --- moldings and glue
-  const moldings = moldingLines(input.sheetRows).filter((m) => m.count > 0 || m.typed);
+  const molding = moldingsByKind(roomRows, input.sheetRows);
+  const legacyLengths = new Set(molding.legacy.map((l) => l.lengthFt));
+  const moldings = molding.lines.filter(
+    (m) => !legacyLengths.has(m.lengthFt) && (m.count > 0 || m.typed),
+  );
   const glue = glueBuckets(totalSheets);
 
   // --- rooms
@@ -133,9 +168,11 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
       label: roomLabel(row, index),
       wallText: row.wallLengths.trim(),
       wallFeet: s.wall.feet,
+      wallWorking: s.wallWorking,
       heightText,
       sheets: s.sheets,
       sheetSize: s.sheetSize,
+      sheetsText: s.sheets !== null ? roomSheetsText(s.parts) : "",
       arithmetic: s.arithmetic,
       problem: s.problem,
     };
@@ -144,45 +181,55 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
   // --- assumptions, in plain words
   const assumptions: string[] = [
     "Walls are measured straight through doors and windows. That is the waste: no extra waste is added and no opening is taken out.",
-    "Sheets for a room = its wall length ÷ the 4 ft sheet width, rounded up. Each room is rounded up on its own.",
-    "Sheet length: 4x8 for panels 8 ft high or less, 4x10 above 8 ft up to 10 ft, 4x12 above 10 ft.",
+    wallRoundingWords(),
+    "Sheets = the counted wall ÷ what one sheet covers: 4 ft for an upright sheet, 8 ft for a 4x8 on its side (panels 4 ft tall or less), 4 ft for a 4x4 panel. The rooms are added per sheet size and rounded up once, at the end.",
+    "Sheet length: 4x8 for panels 8 ft high or less, 4x10 above 8 ft up to 10 ft, 4x12 above 10 ft up to 12 ft. Above 12 ft the sheets are stacked.",
   ];
   roomRows.forEach((row, index) => {
-    const h = suggestion.rooms[index]!.height;
-    if (h.assumed && h.feet !== null) {
+    const r = suggestion.rooms[index]!;
+    const label = roomLabel(row, index);
+    if (r.height.assumed && r.height.feet !== null) {
       assumptions.push(
-        `${roomLabel(row, index)}: no panel height given, so floor to ceiling is assumed (${feetText(h.feet)}).`,
+        `${label}: no panel height given, so floor to ceiling is assumed (${feetText(r.height.feet)}).`,
       );
     }
-  });
-  roomRows.forEach((row, index) => {
-    const { warning, height } = suggestion.rooms[index]!;
-    if (!warning) return;
-    // The same line the room's row shows: a panel taller than a 12 ft sheet,
-    // or a panel of 4 ft or less (the count may be about half).
-    const tooTall = height.feet !== null && height.feet > LONGEST_SHEET_FT;
-    assumptions.push(
-      `${roomLabel(row, index)}: ${warning}.${tooTall ? " Add the sheets above 12 ft yourself." : ""}`,
-    );
+    for (const a of r.assumed) assumptions.push(`${label}: ${a}.`);
+    if (r.stack) assumptions.push(`${label}: stacked ${r.stack.text}. ${r.stack.note}.`);
   });
   for (const s of sheets) {
     if (s.whose === "suggested") continue;
+    if (s.whose === "earlier") {
+      assumptions.push(
+        s.suggested !== s.count
+          ? `${s.size}: ${s.count} sheets, suggested under the earlier rules and kept as saved. The new rules suggest ${s.suggested}.`
+          : `${s.size}: ${s.count} sheets, suggested under the earlier rules and kept as saved (the new rules give the same).`,
+      );
+      continue;
+    }
     assumptions.push(
       s.suggested > 0 && s.suggested !== s.count
         ? `${s.size}: ${s.count} sheets is your own count (the wall lengths suggest ${s.suggested}).`
         : `${s.size}: ${s.count} sheets is your own count.`,
     );
   }
-  if (moldings.length > 0) {
+  if (moldings.length > 0 || molding.legacy.length > 0) {
     assumptions.push(
       "Molding length: 8 ft moldings for sheets 8 ft high or less, 10 ft moldings for sheets above 8 ft.",
     );
   }
+  if (moldings.some((m) => (m.kind === "cap" || m.kind === "divider") && !m.typed)) {
+    assumptions.push(MOLDING_PER_SHEET_ASSUMED);
+  }
+  for (const note of new Set(moldings.flatMap((m) => m.assumed))) assumptions.push(`${note}.`);
   for (const m of moldings) {
+    if (m.typed) assumptions.push(`${MOLDING_KIND_NAMES[m.kind]}, ${m.lengthFt} ft: ${m.count} is your own count.`);
+  }
+  if (moldings.some((m) => m.kind === "insideCorner" || m.kind === "outsideCorner")) {
+    assumptions.push("Corners are the pieces you typed per room from the plans; nothing is guessed.");
+  }
+  for (const l of molding.legacy) {
     assumptions.push(
-      m.typed
-        ? `${m.lengthFt} ft molding: ${m.count} is your own count.`
-        : `${m.lengthFt} ft molding: the count is ASSUMED at one per sheet. That is not a confirmed rule: tell us how you count moldings.`,
+      `${l.lengthFt} ft molding: ${l.count} is the count you typed before moldings were counted by kind. It is kept; the counts by kind for ${l.lengthFt} ft are not used while it is there.`,
     );
   }
   if (totalSheets > 0) {
@@ -191,9 +238,12 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
     );
   }
 
-  const notCounted = rooms
-    .filter((r) => r.problem !== null)
-    .map((r) => `${r.label}: not in the suggested count (${r.problem}).`);
+  const notCounted = [
+    ...rooms
+      .filter((r) => r.problem !== null)
+      .map((r) => `${r.label}: not in the suggested count (${r.problem}).`),
+    ...molding.notCounted,
+  ];
 
   return {
     jobName: input.jobName,
@@ -203,7 +253,9 @@ export function buildMaterialList(input: MaterialListInput): MaterialList {
     thickness: (input.thickness ?? "").trim() || null,
     sheets,
     totalSheets,
+    sizeWorking,
     moldings,
+    legacyMoldings: molding.legacy,
     glue,
     rooms,
     assumptions,
@@ -225,11 +277,18 @@ export function dollars(n: number): string {
   return "$" + whole!.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "." + cents;
 }
 
-const WHOSE: Record<MaterialSheetLine["whose"], string> = {
+export const WHOSE: Record<MaterialSheetLine["whose"], string> = {
   suggested: "suggested from the wall lengths",
   yours: "your own count",
   both: "part suggested, part your own",
+  earlier: "suggested under the earlier rules, kept as saved",
 };
+
+/** Where a molding count comes from, in words. */
+export function moldingFrom(m: KindLine): string {
+  if (m.typed) return "your own count";
+  return m.working + (m.assumed.length > 0 ? " (4x4 panels: assumed)" : "");
+}
 
 /** Standalone HTML for the Material list. Prices appear only if he typed any. */
 export function materialListHtml(list: MaterialList): string {
@@ -251,22 +310,27 @@ export function materialListHtml(list: MaterialList): string {
       ? `<td></td><td class="n">${list.materialsTotal !== null ? dollars(list.materialsTotal) : "not priced"}</td>`
       : "") +
     `</tr>`;
-  const moldingRows = list.moldings
-    .map(
-      (m) =>
-        `<tr><td>${m.lengthFt} ft molding</td><td class="n">${m.count}</td><td>${
-          m.typed ? "your own count" : "ASSUMED one per sheet (not a confirmed rule)"
-        }</td></tr>`,
-    )
-    .join("");
+  const moldingRows =
+    list.moldings
+      .map(
+        (m) =>
+          `<tr><td>${MOLDING_KIND_NAMES[m.kind]}</td><td>${m.lengthFt} ft</td><td class="n">${m.count}</td><td class="w">${esc(moldingFrom(m))}</td></tr>`,
+      )
+      .join("") +
+    list.legacyMoldings
+      .map(
+        (l) =>
+          `<tr><td>${l.lengthFt} ft molding, all kinds</td><td>${l.lengthFt} ft</td><td class="n">${l.count}</td><td class="w">your own count, typed before moldings were counted by kind</td></tr>`,
+      )
+      .join("");
   const roomRows = list.rooms
     .map(
       (r) =>
         `<tr><td>${esc(r.label)}</td><td>${esc(r.wallText) || "&mdash;"}</td>` +
         `<td class="n">${r.wallFeet > 0 ? `${Number(r.wallFeet.toFixed(2))} ft` : "&mdash;"}</td>` +
         `<td>${esc(r.heightText)}</td>` +
-        `<td>${r.sheets !== null ? `${r.sheets} &times; ${r.sheetSize}` : "&mdash;"}</td>` +
-        `<td class="w">${esc(r.sheets !== null ? r.arithmetic : (r.problem ?? ""))}</td></tr>`,
+        `<td>${r.sheets !== null ? esc(r.sheetsText) : "&mdash;"}</td>` +
+        `<td class="w">${esc(r.wallWorking)}${r.wallWorking ? "<br>" : ""}${esc(r.sheets !== null ? r.arithmetic : (r.problem ?? ""))}</td></tr>`,
     )
     .join("");
   const place = [list.address, list.city].map((v) => v.trim()).filter(Boolean).join(", ");
@@ -299,14 +363,17 @@ export function materialListHtml(list: MaterialList): string {
   <h2>Sheets</h2>
   ${
     list.sheets.length > 0
-      ? `<table><tr><th>Size</th><th>Sheets</th><th>Count from</th>${money ? "<th>Each</th><th>Total</th>" : ""}</tr>${sheetRows}${sheetTotal}</table>`
+      ? `<table><tr><th>Size</th><th>Sheets</th><th>Count from</th>${money ? "<th>Each</th><th>Total</th>" : ""}</tr>${sheetRows}${sheetTotal}</table>` +
+        (list.sizeWorking.length > 0
+          ? `<p class="small">Suggested from the walls, rounded up once per size: ${list.sizeWorking.map(esc).join("; ")}.</p>`
+          : "")
       : `<p>No sheets yet.</p>`
   }
 
   <h2>Moldings</h2>
   ${
-    list.moldings.length > 0
-      ? `<table><tr><th>Length</th><th>Pieces</th><th>Count from</th></tr>${moldingRows}</table>`
+    list.moldings.length + list.legacyMoldings.length > 0
+      ? `<table><tr><th>Kind</th><th>Length</th><th>Pieces</th><th>Count from</th></tr>${moldingRows}</table>`
       : `<p>No moldings yet.</p>`
   }
 

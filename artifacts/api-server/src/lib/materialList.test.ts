@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { buildMaterialList, materialListHtml, type MaterialListInput } from "./materialList";
-import { applySuggestions, setMoldingCount, type RoomRow } from "./takeoffRules";
+import { CURRENT_RULES, applySuggestions, setMoldingCount, type RoomRow } from "./takeoffRules";
 
 const room = (over: Partial<RoomRow>): RoomRow => ({
   roomName: null,
@@ -22,7 +22,8 @@ const room = (over: Partial<RoomRow>): RoomRow => ({
 
 const rooms: RoomRow[] = [
   room({ roomName: "Kitchen", roomNumber: "101", wallLengths: "12 + 12 + 10", materialHeight: "8'-0\"", ceilingHeight: "9'-0\"" }),
-  room({ roomName: "Prep", roomNumber: "102", wallLengths: "10 + 10 + 10 + 10", materialHeight: "9'-0\"", ceilingHeight: "10'-0\"" }),
+  // Update 2: 12 + 12 + 8 + 8 so Prep still counts 40 ft (10 + 10 + 10 + 10 now counts as 48 ft).
+  room({ roomName: "Prep", roomNumber: "102", wallLengths: "12 + 12 + 8 + 8", materialHeight: "9'-0\"", ceilingHeight: "10'-0\"" }),
   room({ roomName: "Restroom", roomNumber: "103", wallLengths: "6 + 6 + 5'-6\" + 5'-6\"", ceilingHeight: "10'-0\"" }),
 ];
 
@@ -40,30 +41,37 @@ const input = (over: Partial<MaterialListInput> = {}): MaterialListInput => ({
 describe("material list", () => {
   const list = buildMaterialList(input());
 
+  // Update 2: each wall counts up to the next 4 ft (Restroom: 6 + 6 + 5'-6" +
+  // 5'-6" counts as 32 ft, 8 sheets), and moldings are counted by kind.
   it("lists the sheets by size", () => {
     expect(list.sheets).toEqual([
       { size: "4x8", count: 9, whose: "suggested", suggested: 9, price: null, total: null },
-      { size: "4x10", count: 16, whose: "suggested", suggested: 16, price: null, total: null },
+      { size: "4x10", count: 18, whose: "suggested", suggested: 18, price: null, total: null },
     ]);
-    expect(list.totalSheets).toBe(25);
+    expect(list.totalSheets).toBe(27);
   });
 
-  it("lists the moldings by length and the glue buckets", () => {
-    expect(list.moldings).toEqual([
-      { lengthFt: 8, sheets: 9, suggested: 9, count: 9, typed: false },
-      { lengthFt: 10, sheets: 16, suggested: 16, count: 16, typed: false },
+  it("lists the moldings by kind and length, and the glue buckets", () => {
+    expect(list.moldings.map((m) => [m.kind, m.lengthFt, m.count, m.typed])).toEqual([
+      ["cap", 8, 9, false],
+      ["divider", 8, 9, false],
+      ["cap", 10, 18, false],
+      ["divider", 10, 18, false],
     ]);
     expect(list.glue.buckets).toBe(3);
-    expect(list.glue.arithmetic).toBe("25 sheets ÷ 12 a bucket = 2.08, rounded up to 3 buckets");
+    expect(list.glue.arithmetic).toBe("27 sheets ÷ 12 a bucket = 2.25, rounded up to 3 buckets");
   });
 
   it("lists each room with its wall length, height and working", () => {
     expect(list.rooms.map((r) => [r.label, r.wallFeet, r.heightText, r.sheets, r.sheetSize])).toEqual([
       ["Kitchen 101", 34, "8 ft", 9, "4x8"],
       ["Prep 102", 40, "9 ft", 10, "4x10"],
-      ["Restroom 103", 23, "10 ft (assumed to ceiling)", 6, "4x10"],
+      ["Restroom 103", 23, "10 ft (assumed to ceiling)", 8, "4x10"],
     ]);
-    expect(list.rooms[2]!.arithmetic).toBe("23 ft of wall ÷ 4 ft a sheet = 5.75, rounded up to 6 sheets of 4x10");
+    expect(list.rooms[2]!.wallWorking).toBe(
+      "6 ft counted as 8 ft + 6 ft counted as 8 ft + 5 ft 6 in counted as 8 ft + 5 ft 6 in counted as 8 ft = 32 ft",
+    );
+    expect(list.rooms[2]!.arithmetic).toBe("32 ft ÷ 4 ft a sheet = 8 sheets of 4x10");
   });
 
   it("states every assumption used, in plain words", () => {
@@ -71,8 +79,8 @@ describe("material list", () => {
     expect(all).toMatch(/straight through doors and windows/);
     expect(all).toMatch(/no extra waste/i);
     expect(all).toMatch(/Restroom 103: no panel height.*floor to ceiling.*10 ft/);
-    expect(all).toMatch(/8 ft molding.*ASSUMED.*one per sheet/);
-    expect(all).toMatch(/10 ft molding.*ASSUMED.*one per sheet/);
+    expect(all).toMatch(/rounded up to the next 4 ft.*ASSUMED/);
+    expect(all).toMatch(/"Per sheet" is our reading of your words \(assumed\)/);
     expect(all).toMatch(/one bucket does 12 sheets/);
     // rooms whose height came from the plans are not listed as assumed
     expect(all).not.toMatch(/Kitchen 101: no panel height/);
@@ -112,7 +120,7 @@ describe("material list", () => {
         sheetRows: setMoldingCount(
           [
             { sheetsNeeded: 12, sheetSize: "4x8", pricePerSheet: 0, sheetsSource: "typed" },
-            { sheetsNeeded: 16, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "suggested" },
+            { sheetsNeeded: 18, sheetSize: "4x10", pricePerSheet: 0, sheetsSource: "suggested", rules: CURRENT_RULES },
           ],
           10,
           22,
@@ -122,8 +130,9 @@ describe("material list", () => {
     expect(mine.sheets[0]).toMatchObject({ size: "4x8", count: 12, whose: "yours", suggested: 9 });
     const all = mine.assumptions.join("\n");
     expect(all).toMatch(/4x8: 12 sheets is your own count \(the wall lengths suggest 9\)/);
-    expect(all).toMatch(/10 ft molding: 22 is your own count/);
-    expect(all).toMatch(/8 ft molding.*ASSUMED/);
+    // a count typed per length (how update 1 kept it) is still his
+    expect(all).toMatch(/10 ft molding: 22 is the count you typed before moldings were counted by kind/);
+    expect(all).toMatch(/"Per sheet" is our reading of your words \(assumed\)/);
   });
 
   it("names a room that is not in the count, and why", () => {
@@ -134,15 +143,17 @@ describe("material list", () => {
     expect(materialListHtml(withGap)).toContain("Storage 104");
   });
 
-  it("warns on the list when a panel is taller than a 12 ft sheet", () => {
+  it("a panel taller than a 12 ft sheet with nothing to start a stack from is listed as not counted", () => {
     const tall = buildMaterialList(
       input({ roomRows: [room({ roomName: "Warehouse", roomNumber: "120", wallLengths: "40", ceilingHeight: "14'" })], sheetRows: [] }),
     );
-    expect(tall.assumptions.join("\n")).toMatch(/Warehouse 120: .*14 ft.*taller than a 12 ft sheet/);
-    expect(buildMaterialList(input()).assumptions.join("\n")).not.toMatch(/taller than/);
+    expect(tall.notCounted.join("\n")).toMatch(/Warehouse 120: .*14 ft.*taller than a 12 ft sheet/);
+    expect(buildMaterialList(input()).notCounted.join("\n")).not.toMatch(/taller than/);
   });
 
-  it("says on the list when a panel is 4 ft or less: the count may be about half", () => {
+  // Update 2 (his answer 3): the count for a panel of 4 ft or less is now his
+  // rule, a 4x8 on its side, so the old "may be about half" line is gone.
+  it("a panel of 4 ft or less is counted as a 4x8 on its side", () => {
     const wainscot = (height: string) =>
       buildMaterialList(
         input({
@@ -150,27 +161,18 @@ describe("material list", () => {
           sheetRows: applySuggestions([], [room({ wallLengths: "12 + 12 + 10", materialHeight: height })], []),
         }),
       );
-    const line =
-      "Dining 110: the panel is 4 ft high: this counts one full 4x8 for every 4 ft of wall, " +
-      "but one 4x8 cut in half covers 8 ft of wall, so the true count may be about half: tell us your rule.";
     for (const height of ["4'", '48"']) {
       const list = wainscot(height);
-      expect(list.assumptions).toContain(line);
-      // the count itself is not changed
+      // 36 ft counted ÷ 8 ft a sheet = 4.5, rounded up to 5
       expect(list.sheets).toEqual([
-        { size: "4x8", count: 9, whose: "suggested", suggested: 9, price: null, total: null },
+        { size: "4x8", count: 5, whose: "suggested", suggested: 5, price: null, total: null },
       ]);
-      expect(materialListHtml(list)).toContain("so the true count may be about half: tell us your rule.");
-      expect(list.assumptions.join("\n")).not.toMatch(/above 12 ft/);
+      expect(list.rooms[0]!.sheetsText).toBe("4.5 × 4x8 on its side");
+      expect(materialListHtml(list)).not.toMatch(/about half/);
     }
     for (const height of ["4.01", "8'"]) {
-      expect(wainscot(height).assumptions.join("\n")).not.toMatch(/about half/);
+      expect(wainscot(height).sheets[0]).toMatchObject({ count: 9 });
     }
-    // the taller-than-12-ft line keeps its own ending
-    const tall = buildMaterialList(
-      input({ roomRows: [room({ roomName: "Warehouse", roomNumber: "120", wallLengths: "40", ceilingHeight: "14'" })], sheetRows: [] }),
-    );
-    expect(tall.assumptions.join("\n")).toMatch(/for each 4 ft of wall only\. Add the sheets above 12 ft yourself\./);
   });
 
   it("escapes what a person typed before it goes into the printed page", () => {

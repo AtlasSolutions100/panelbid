@@ -30,6 +30,19 @@ export interface RoomRow {
    * before update 1.
    */
   ceilingHeight?: string | null;
+  /**
+   * Inside and outside corner pieces he counted from the plans (update 2).
+   * Null or absent: none typed. Never guessed.
+   */
+  insideCorners?: number | null;
+  outsideCorners?: number | null;
+  /**
+   * "4x4 panel" ticked (true) or unticked (false) by hand. Null or absent: by
+   * the product name (see fourByFourFor).
+   */
+  fourByFour?: boolean | null;
+  /** The courses of a wall taller than 12 ft as he typed them ("10 + 4"). Null: suggested. */
+  stackCourses?: string | null;
 }
 
 /** One sheet line on the takeoff sheet (stored as JSON in takeoffs.sheet_rows). */
@@ -43,8 +56,18 @@ export interface SheetRow {
    * update 1 have no mark, so they are his.)
    */
   sheetsSource?: "suggested" | "typed";
-  /** Typed molding count for this row's molding length; null/absent = not typed. */
+  /**
+   * Typed molding count for this row's molding length, all kinds together:
+   * how counts were typed before update 2. Null/absent = not typed.
+   */
   moldingCount?: number | null;
+  /**
+   * The rules a SUGGESTED row was made under (CURRENT_RULES). A suggested row
+   * without it was made before update 2 and keeps its saved count.
+   */
+  rules?: number;
+  /** His typed counts by molding kind and length ("cap-8": 12), the same on every row. */
+  moldingCounts?: Record<string, number> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +288,55 @@ export function resolvePanelHeight(
 }
 
 // ---------------------------------------------------------------------------
+// Rounding each wall (update 2, his answer 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * How far each wall is rounded UP before the walls are added.
+ *
+ * His words: "im a little confused by this. we take each wall and round to the
+ * nearest foot. if its a 7 foot wall we round to 8 feet and if the wall is 3
+ * feet we round to 4 feet. at the end we round the total sheet count up to the
+ * next full sheet"
+ *
+ * His two examples (7 -> 8, 3 -> 4) fit two readings: up to the next 4 ft, or
+ * up to the next even foot. A 5 ft wall tells them apart (8 ft or 6 ft).
+ */
+export type WallRounding = 4 | 2;
+
+/**
+ * THE OPEN POINT, in one place. 4 = each wall up to the next 4 ft (a 5 ft wall
+ * counts as 8 ft); 2 = up to the next even foot (a 5 ft wall counts as 6 ft).
+ * ASSUMED 4 until he answers "A 5-foot wall: do you count it as 8 feet or as
+ * 6?". His answer is a change to this one line (and its test).
+ */
+export const WALL_ROUND_UP_TO_FT: WallRounding = 4;
+
+/** One wall in feet, rounded up to the step (8 stays 8; 7 -> 8; 3 -> 4). */
+export function roundWallUp(feet: number, stepFt: WallRounding = WALL_ROUND_UP_TO_FT): number {
+  const units = Math.round(feet * UNITS_PER_FOOT);
+  return roundUnitsUp(units, stepFt) / UNITS_PER_FOOT;
+}
+
+function roundUnitsUp(units: number, stepFt: WallRounding): number {
+  if (!(units > 0)) return 0;
+  const step = stepFt * UNITS_PER_FOOT;
+  return Math.ceil(units / step) * step;
+}
+
+/** The words the screen uses for the rounding, marked as assumed. */
+export function wallRoundingWords(stepFt: WallRounding = WALL_ROUND_UP_TO_FT): string {
+  return stepFt === 4
+    ? "Each wall is rounded up to the next 4 ft before the walls are added (7 ft counts as 8 ft, 3 ft as 4 ft, 5 ft as 8 ft). ASSUMED: your examples also fit \"up to the next even foot\" (5 ft as 6 ft); we asked which you use."
+    : "Each wall is rounded up to the next even foot before the walls are added (7 ft counts as 8 ft, 3 ft as 4 ft, 5 ft as 6 ft).";
+}
+
+export interface RoundedWall {
+  typedFt: number;
+  countedFt: number;
+}
+
+// ---------------------------------------------------------------------------
 // Suggested sheets
 // ---------------------------------------------------------------------------
 
@@ -312,93 +384,458 @@ export function roomLabel(
   return `Room ${index + 1}`;
 }
 
+/** His longest sheet. A panel taller than this is stacked. */
+export const LONGEST_SHEET_FT = 12;
+
+/**
+ * A panel this high or lower is "4' tall" material. His words (answer 3):
+ * "for 4' tall we put the 4x8 on its side but for products like marlite
+ * symetrix it comes in a 4x4 panel. to my knowledge that is the only panel
+ * type that comes in a 4x4."
+ */
+export const ON_SIDE_MAX_FT = 4;
+
+/** What one 4x8 on its side covers along the wall. */
+export const ON_SIDE_COVER_FT = 8;
+
+/**
+ * The product he names as coming in a 4x4 ("marlite symetrix"). Matched on the
+ * room's manufacturer and product boxes; the match is our reading, so the row
+ * says "assumed" and he can untick it.
+ */
+const FOUR_BY_FOUR_PRODUCT = /symm?etrix/i;
+
+export interface FourByFour {
+  /** True when the room is counted in 4x4 panels. */
+  on: boolean;
+  /** ticked / unticked: his own tick. product: matched on the product name. */
+  source: "ticked" | "unticked" | "product" | "none";
+  /** The product text that matched, when source is "product". */
+  match: string | null;
+}
+
+export function fourByFourFor(
+  row: Pick<RoomRow, "fourByFour" | "manufacturer" | "productCode">,
+): FourByFour {
+  if (row.fourByFour === true) return { on: true, source: "ticked", match: null };
+  if (row.fourByFour === false) return { on: false, source: "unticked", match: null };
+  for (const text of [row.productCode, row.manufacturer]) {
+    const hit = FOUR_BY_FOUR_PRODUCT.exec(text ?? "");
+    if (hit) return { on: true, source: "product", match: hit[0] };
+  }
+  return { on: false, source: "none", match: null };
+}
+
+/** One kind of sheet a room takes (a stacked wall takes one per course). */
+export interface SheetPart {
+  size: SheetSize;
+  /** A 4x8 laid on its side (4 ft tall, 8 ft along the wall). */
+  onSide: boolean;
+  /** The course height in a stack, else null. */
+  courseFt: number | null;
+  /** How much wall one sheet covers along the floor, in feet. */
+  coverFt: number;
+  /** Counted wall ÷ cover. NOT rounded: the job rounds once per size. */
+  sheets: number;
+  /** The panel is 4 ft tall or less (two caps a sheet). */
+  fourFtTall: boolean;
+}
+
+export type RoomLayout = "upright" | "onSide" | "fourByFour" | "stack";
+
+export interface RoomStack {
+  /** Course heights from the floor up, in feet. */
+  courses: number[];
+  /** True when he typed the courses. */
+  typed: boolean;
+  /** The courses in words: "10 ft: 4x10 upright + 4 ft: 4x8 on its side". */
+  text: string;
+  /** How the stack was chosen, ending with "your call". */
+  note: string;
+}
+
 export interface RoomSuggestion {
   wall: LengthRead;
+  /** Each wall as typed and as counted (rounded up). */
+  walls: RoundedWall[];
+  /** The rounded walls added up, in feet. */
+  countedFeet: number;
+  /** "7 ft counted as 8 ft + 3 ft counted as 4 ft = 12 ft". */
+  wallWorking: string;
   height: PanelHeight;
-  /** Null when no count can be suggested (see problem). */
+  layout: RoomLayout | null;
+  parts: SheetPart[];
+  /** All the room's sheets (not rounded; a 4x8 on its side may be 1.5). Null when none can be suggested. */
   sheets: number | null;
-  /** Null when the room has no height. */
+  /** The room's sheet size (the first course of a stack). Null without a height. */
   sheetSize: SheetSize | null;
-  /** The working, in words, e.g. "34 ft of wall ÷ 4 ft a sheet = 8.5, rounded up to 9 sheets of 4x10". */
+  /** The working, in words. */
   arithmetic: string;
   /** Why there is no suggestion, in words. Null when there is one. */
   problem: string | null;
   /** Something to check about a suggestion that IS given. Null when nothing. */
   warning: string | null;
+  /** Where this room's count goes beyond his words: shown as "assumed". */
+  assumed: string[];
+  fourByFour: FourByFour;
+  /** The courses of a wall taller than 12 ft, else null. */
+  stack: RoomStack | null;
 }
 
-/** His longest sheet. A panel taller than this cannot be covered by one sheet. */
-export const LONGEST_SHEET_FT = 12;
+export interface SuggestOptions {
+  /** The wall rounding to use. Defaults to WALL_ROUND_UP_TO_FT. */
+  rounding?: WallRounding;
+  /**
+   * The sheet length the rest of the job uses (8, 10 or 12), to start a stack
+   * from. Null or absent: none, so a wall taller than 12 ft asks.
+   */
+  jobSheetLengthFt?: number | null;
+}
+
+function sheetsNoun(n: number, word = "sheet"): string {
+  return n === 1 ? word : `${word}s`;
+}
 
 /**
- * Half of a 4x8. A panel no higher than this can come two to a sheet, so the
- * suggested count (one full sheet per 4 ft of wall) may be about double.
+ * The stack he would start from (answer 2): "if the restr of the job is 8' we
+ * would start with an 8 then stack 8s to reach the desired height. if we have
+ * 10s on the job but need to hit 14' then it would be a 10' vertical and an 8'
+ * horizontal." So: the job's sheet length upright, then the same length again
+ * while more than 4 ft is left, and a 4x8 on its side for the last 4 ft or
+ * less. Course heights in feet. Always shown as "your call".
  */
-export const HALF_SHEET_FT = 4;
+export function suggestStack(heightFt: number, jobSheetLengthFt: number): number[] {
+  const courses: number[] = [];
+  let left = heightFt;
+  while (left > 0 && courses.length < 20) {
+    if (courses.length > 0 && left <= ON_SIDE_MAX_FT) {
+      courses.push(ON_SIDE_MAX_FT);
+      break;
+    }
+    courses.push(jobSheetLengthFt);
+    left -= jobSheetLengthFt;
+  }
+  return courses;
+}
+
+/** A course height in a stack, as a sheet: 4 ft or less is a 4x8 on its side. */
+function courseSheet(courseFt: number): { size: SheetSize; onSide: boolean } {
+  if (courseFt <= ON_SIDE_MAX_FT) return { size: "4x8", onSide: true };
+  return { size: sheetSizeForHeight(courseFt), onSide: false };
+}
+
+function courseWords(courseFt: number): string {
+  const { size, onSide } = courseSheet(courseFt);
+  if (onSide) return `${feetText(courseFt)}: 4x8 on its side`;
+  const full = Number(size.split("x")[1]);
+  return `${feetText(courseFt)}: ${size} upright${courseFt < full ? ` (cut to ${feetText(courseFt)})` : ""}`;
+}
+
+/** Courses as he types them: "10 + 4", "8, 8". */
+export function readCourses(text: string): { ok: true; courses: number[] } | { ok: false; reason: string } {
+  const courses: number[] = [];
+  for (const piece of straightQuotes(text).split(/[+,;]/)) {
+    const term = piece.trim();
+    if (term === "") continue;
+    const units = readOneLength(term);
+    if (units === null || units <= 0) {
+      return { ok: false, reason: `can't read "${term}" in the courses: type them like 10 + 4` };
+    }
+    const feet = units / UNITS_PER_FOOT;
+    if (feet > LONGEST_SHEET_FT) {
+      return { ok: false, reason: `a course of ${feetText(feet)} is taller than a ${LONGEST_SHEET_FT} ft sheet` };
+    }
+    courses.push(feet);
+  }
+  if (courses.length === 0) return { ok: false, reason: "no courses typed" };
+  return { ok: true, courses };
+}
+
+function partOf(
+  size: SheetSize,
+  onSide: boolean,
+  courseFt: number | null,
+  countedUnits: number,
+  fourFtTall: boolean,
+): SheetPart {
+  const coverFt = onSide ? ON_SIDE_COVER_FT : SHEET_WIDTH_FT;
+  return {
+    size,
+    onSide,
+    courseFt,
+    coverFt,
+    sheets: countedUnits / (coverFt * UNITS_PER_FOOT),
+    fourFtTall,
+  };
+}
+
+function partWorking(part: SheetPart, countedFeet: number): string {
+  const n = part.sheets;
+  if (part.size === "4x4") {
+    return `${plain(countedFeet)} ft ÷ ${part.coverFt} ft a panel = ${plain(n)} ${sheetsNoun(n, "panel")} of 4x4`;
+  }
+  const how = part.onSide ? " (4x8 on its side)" : "";
+  return `${plain(countedFeet)} ft ÷ ${part.coverFt} ft a sheet${how} = ${plain(n)} ${sheetsNoun(n)} of ${part.size}`;
+}
 
 /**
- * Suggested sheets for one room: wall length ÷ the 4 ft sheet width, rounded
- * up. The walls are measured straight through doors and windows ("Yes we
- * measure through windows and doors to get our waste"), so NO waste is added
- * and NO opening is taken out.
+ * Suggested sheets for one room.
+ *
+ * - Each wall is rounded up (WALL_ROUND_UP_TO_FT) and the rounded walls added.
+ *   The walls are measured straight through doors and windows ("Yes we
+ *   measure through windows and doors to get our waste"), so NO waste is
+ *   added and NO opening is taken out.
+ * - A panel 4 ft tall or less: a 4x8 on its side covers 8 ft of wall; a 4x4
+ *   product covers 4 ft a panel.
+ * - Above 4 ft up to 12 ft: one upright sheet per 4 ft of wall.
+ * - Taller than 12 ft: stacked courses (see suggestStack), never a silent count.
+ * - The room's count is NOT rounded here: the job rounds once per sheet size.
  */
-export function suggestRoom(row: RoomRow): RoomSuggestion {
+export function suggestRoom(row: RoomRow, options: SuggestOptions = {}): RoomSuggestion {
+  const rounding = options.rounding ?? WALL_ROUND_UP_TO_FT;
   const wall = readWallLengths(row.wallLengths);
   const height = resolvePanelHeight(row);
-  const sheetSize = height.feet !== null ? sheetSizeForHeight(height.feet) : null;
-  let problem: string | null = null;
-  if (!wall.ok) problem = `can't read "${wall.unread[0]}" in the wall lengths`;
-  else if (wall.units <= 0) problem = "no wall length typed";
-  else if (sheetSize === null) problem = height.note;
-  if (problem !== null || sheetSize === null) {
-    return { wall, height, sheets: null, sheetSize, arithmetic: "", problem, warning: null };
+  const fourByFour = fourByFourFor(row);
+  const walls: RoundedWall[] = wall.parts.map((ft) => ({
+    typedFt: ft,
+    countedFt: roundUnitsUp(Math.round(ft * UNITS_PER_FOOT), rounding) / UNITS_PER_FOOT,
+  }));
+  const countedUnits = walls.reduce((sum, w) => sum + Math.round(w.countedFt * UNITS_PER_FOOT), 0);
+  const countedFeet = countedUnits / UNITS_PER_FOOT;
+  const wallWorking =
+    walls.length === 0
+      ? ""
+      : `${walls
+          .map((w) =>
+            w.countedFt === w.typedFt
+              ? feetText(w.typedFt)
+              : `${feetText(w.typedFt)} counted as ${feetText(w.countedFt)}`,
+          )
+          .join(" + ")} = ${feetText(countedFeet)}`;
+  const base = {
+    wall,
+    walls,
+    countedFeet,
+    wallWorking,
+    height,
+    fourByFour,
+    warning: null,
+  };
+  const none = (problem: string, sheetSize: SheetSize | null = null): RoomSuggestion => ({
+    ...base,
+    layout: null,
+    parts: [],
+    sheets: null,
+    sheetSize,
+    arithmetic: "",
+    problem,
+    assumed: [],
+    stack: null,
+  });
+
+  const h = height.feet;
+  const plainSize = h !== null ? sheetSizeForHeight(h) : null;
+  if (!wall.ok) return none(`can't read "${wall.unread[0]}" in the wall lengths`, plainSize);
+  if (wall.units <= 0) return none("no wall length typed", plainSize);
+  if (h === null) return none(height.note);
+
+  const assumed: string[] = [];
+
+  // A panel 4 ft tall or less.
+  if (h <= ON_SIDE_MAX_FT) {
+    if (fourByFour.on) {
+      if (fourByFour.source === "product") {
+        assumed.push(
+          `4x4 panels because the product says "${fourByFour.match}" (assumed: untick 4x4 if this room takes 4x8s)`,
+        );
+      }
+      const part = partOf("4x4", false, null, countedUnits, true);
+      return {
+        ...base,
+        layout: "fourByFour",
+        parts: [part],
+        sheets: part.sheets,
+        sheetSize: "4x4",
+        arithmetic: partWorking(part, countedFeet),
+        problem: null,
+        assumed,
+        stack: null,
+      };
+    }
+    const part = partOf("4x8", true, null, countedUnits, true);
+    return {
+      ...base,
+      layout: "onSide",
+      parts: [part],
+      sheets: part.sheets,
+      sheetSize: "4x8",
+      arithmetic: partWorking(part, countedFeet),
+      problem: null,
+      assumed,
+      stack: null,
+    };
   }
-  // His sizes stop at 4x12. Above that the count below is one sheet per 4 ft
-  // of wall only, which is too few: say so rather than let it pass.
-  //
-  // A panel of 4 ft or less (a wainscot) is the other way round: one 4x8 cut
-  // in half covers 8 ft of wall, so the count below may be about twice what
-  // he buys. He has not given his rule for it, so the count is NOT changed
-  // and no rule is invented: the row says so and asks.
-  const warning =
-    height.feet !== null && height.feet > LONGEST_SHEET_FT
-      ? `the panel is ${feetText(height.feet)} high, taller than a ${LONGEST_SHEET_FT} ft sheet: this counts one 4x12 for each 4 ft of wall only`
-      : height.feet !== null && height.feet <= HALF_SHEET_FT
-        ? `the panel is ${feetText(height.feet)} high: this counts one full ${sheetSize} for every ${SHEET_WIDTH_FT} ft of wall, but one 4x8 cut in half covers 8 ft of wall, so the true count may be about half: tell us your rule`
-        : null;
-  const sheetUnits = SHEET_WIDTH_FT * UNITS_PER_FOOT;
-  const sheets = Math.ceil(wall.units / sheetUnits);
-  const noun = sheets === 1 ? "sheet" : "sheets";
-  const start = `${plain(wall.feet)} ft of wall ÷ ${SHEET_WIDTH_FT} ft a sheet = `;
-  const arithmetic =
-    wall.units % sheetUnits === 0
-      ? `${start}${sheets} ${noun} of ${sheetSize}`
-      : `${start}${plain(wall.feet / SHEET_WIDTH_FT)}, rounded up to ${sheets} ${noun} of ${sheetSize}`;
-  return { wall, height, sheets, sheetSize, arithmetic, problem: null, warning };
+
+  // A 4x4 ticked by hand on a taller panel: no rule for stacking 4x4s.
+  if (fourByFour.source === "ticked") {
+    return none(
+      `4x4 is ticked, but the panel is ${feetText(h)} high: how you stack 4x4 panels above 4 ft is not a rule we have. Untick 4x4, or type the sheet count yourself`,
+      plainSize,
+    );
+  }
+
+  // Up to his longest sheet: one upright sheet per 4 ft of wall.
+  if (h <= LONGEST_SHEET_FT) {
+    const part = partOf(sheetSizeForHeight(h), false, null, countedUnits, false);
+    return {
+      ...base,
+      layout: "upright",
+      parts: [part],
+      sheets: part.sheets,
+      sheetSize: part.size,
+      arithmetic: partWorking(part, countedFeet),
+      problem: null,
+      assumed,
+      stack: null,
+    };
+  }
+
+  // Taller than 12 ft: stacked courses.
+  const typedText = (row.stackCourses ?? "").trim();
+  let courses: number[];
+  let typed: boolean;
+  let note: string;
+  if (typedText !== "") {
+    const read = readCourses(typedText);
+    if (!read.ok) return none(read.reason, "4x12");
+    courses = read.courses;
+    typed = true;
+    note = "your courses: change them if you would stack it differently";
+  } else {
+    const start = options.jobSheetLengthFt ?? null;
+    if (start === null) {
+      return none(
+        `the panel is ${feetText(h)} high, taller than a ${LONGEST_SHEET_FT} ft sheet, and the job has no other sheet size yet to start the stack from: type the courses (for example 10 + 4)`,
+        "4x12",
+      );
+    }
+    courses = suggestStack(h, start);
+    typed = false;
+    note = `the rest of the job uses ${start} ft sheets, so it starts with a ${start} ft sheet: your call: change it if you would stack it differently`;
+  }
+  const reach = courses.reduce((a, b) => a + b, 0);
+  if (reach < h - 1e-9) {
+    return none(
+      `the courses reach ${feetText(reach)}, but the panel is ${feetText(h)} high: add a course`,
+      "4x12",
+    );
+  }
+  const parts = courses.map((c) => {
+    const { size, onSide } = courseSheet(c);
+    return partOf(size, onSide, c, countedUnits, false);
+  });
+  const sheets = parts.reduce((sum, p) => sum + p.sheets, 0);
+  const text = courses.map(courseWords).join(" + ");
+  return {
+    ...base,
+    layout: "stack",
+    parts,
+    sheets,
+    sheetSize: parts[0]!.size,
+    arithmetic: parts
+      .map((p, i) => `course ${i + 1}, ${courseWords(p.courseFt!)}: ${partWorking(p, countedFeet)}`)
+      .join("; "),
+    problem: null,
+    assumed,
+    stack: { courses, typed, text, note },
+  };
 }
 
 export interface JobSuggestion {
   rooms: RoomSuggestion[];
-  /** Suggested sheets per size (each room rounded up on its own, then added). */
+  /** Suggested sheets per size: the rooms' sheets added, rounded up ONCE per size. */
   bySize: Record<SheetSize, number>;
+  /** The same before rounding. */
+  exactBySize: Record<SheetSize, number>;
+  /** The working per size: "4x8: 1.5 + 1.5 = 3 sheets". */
+  sizeWorking: Partial<Record<SheetSize, string>>;
+  /** The sheet length the job's walls of 12 ft or less use (the longest), or null. */
+  jobSheetLengthFt: number | null;
 }
 
-export function suggestSheets(roomRows: RoomRow[]): JobSuggestion {
-  const rooms = roomRows.map(suggestRoom);
-  const bySize: Record<SheetSize, number> = { "4x4": 0, "4x8": 0, "4x10": 0, "4x12": 0 };
-  for (const r of rooms) {
-    if (r.sheets !== null && r.sheetSize !== null) bySize[r.sheetSize] += r.sheets;
+const zeroBySize = (): Record<SheetSize, number> => ({ "4x4": 0, "4x8": 0, "4x10": 0, "4x12": 0 });
+
+/**
+ * The job's suggested sheets. His words: "at the end we round the total sheet
+ * count up to the next full sheet": the rooms' sheets are added per size and
+ * rounded up once, at the end.
+ */
+export function suggestSheets(roomRows: RoomRow[], options: { rounding?: WallRounding } = {}): JobSuggestion {
+  // First the walls of 12 ft or less: they tell a tall wall which sheet the
+  // rest of the job uses ("depending on the rest of the job").
+  const first = roomRows.map((row) => suggestRoom(row, { rounding: options.rounding }));
+  let jobSheetLengthFt: number | null = null;
+  for (const r of first) {
+    if (r.layout !== "upright" && r.layout !== "onSide") continue;
+    const len = Number(r.parts[0]!.size.split("x")[1]);
+    jobSheetLengthFt = jobSheetLengthFt === null ? len : Math.max(jobSheetLengthFt, len);
   }
-  return { rooms, bySize };
+  const rooms = roomRows.map((row, i) => {
+    const h = first[i]!.height.feet;
+    return h !== null && h > LONGEST_SHEET_FT
+      ? suggestRoom(row, { rounding: options.rounding, jobSheetLengthFt })
+      : first[i]!;
+  });
+  const exactBySize = zeroBySize();
+  const terms: Record<SheetSize, number[]> = { "4x4": [], "4x8": [], "4x10": [], "4x12": [] };
+  for (const r of rooms) {
+    for (const p of r.parts) {
+      exactBySize[p.size] += p.sheets;
+      terms[p.size].push(p.sheets);
+    }
+  }
+  const bySize = zeroBySize();
+  const sizeWorking: Partial<Record<SheetSize, string>> = {};
+  for (const size of SHEET_SIZES) {
+    const exact = exactBySize[size];
+    if (!(exact > 0)) continue;
+    const count = Math.ceil(exact - 1e-9);
+    bySize[size] = count;
+    const sum = terms[size].length > 1 ? `${terms[size].map(plain).join(" + ")} = ` : "";
+    sizeWorking[size] =
+      count === exact
+        ? `${size}: ${sum}${plain(count)} ${sheetsNoun(count)}`
+        : `${size}: ${sum}${plain(exact)}, rounded up to ${count} ${sheetsNoun(count)}`;
+  }
+  return { rooms, bySize, exactBySize, sizeWorking, jobSheetLengthFt };
 }
 
+/** The rules a suggested row was made under. Rows made before update 2 have none. */
+export const CURRENT_RULES = 2;
+
+/** Any suggested row, whichever rules it was made under. */
 export function isSuggested(row: SheetRow): boolean {
   return row.sheetsSource === "suggested";
 }
 
+/** A suggested row made under the current rules: its count follows the walls. */
+export function followsWalls(row: SheetRow): boolean {
+  return row.sheetsSource === "suggested" && row.rules === CURRENT_RULES;
+}
+
 /**
- * Bring every SUGGESTED sheet row up to date with the rooms. Rows the person
- * typed are returned untouched. No row is added or removed. The server runs
+ * A row suggested under the earlier rules (saved before update 2). It keeps
+ * the count it was saved with until he chooses the new count: an old job
+ * opens, saves and prints with the numbers it was saved with.
+ */
+export function suggestedEarlier(row: SheetRow): boolean {
+  return row.sheetsSource === "suggested" && row.rules !== CURRENT_RULES;
+}
+
+/**
+ * Bring every SUGGESTED sheet row made under the current rules up to date
+ * with the rooms. Rows the person typed, and rows suggested under the earlier
+ * rules, are returned untouched. No row is added or removed. The server runs
  * this on every save and before every proposal, so a stale suggested count is
  * never stored or printed.
  */
@@ -406,7 +843,7 @@ export function refreshSuggestedRows(roomRows: RoomRow[], sheetRows: SheetRow[])
   const bySize = suggestSheets(roomRows).bySize;
   const given = new Set<SheetSize>();
   return sheetRows.map((row) => {
-    if (!isSuggested(row)) return row;
+    if (!followsWalls(row)) return row;
     const count = given.has(row.sheetSize) ? 0 : bySize[row.sheetSize];
     given.add(row.sheetSize);
     return row.sheetsNeeded === count ? row : { ...row, sheetsNeeded: count };
@@ -416,15 +853,16 @@ export function refreshSuggestedRows(roomRows: RoomRow[], sheetRows: SheetRow[])
 /**
  * The sheet rows after the rooms changed from prevRooms to nextRooms.
  *
- * - Suggested rows follow the wall lengths.
+ * - Suggested rows (current rules) follow the wall lengths.
  * - A size whose suggestion changed and that has no row at all gets a
  *   suggested row.
  * - A row the person typed is never changed, and no suggested row is added
- *   beside it for the same size.
+ *   beside it for the same size. The same goes for a row suggested under the
+ *   earlier rules: it keeps its saved count until he picks the new one.
  * - A suggested row the person deleted does not come back until the
  *   suggestion for that size itself changes.
  * - A suggested row with nothing typed in it goes away when its rooms do.
- * - A new suggested row takes its place in sheet-size order (4x8, 4x10,
+ * - A new suggested row takes its place in sheet-size order (4x4, 4x8, 4x10,
  *   4x12), so rows do not jump about while a wall length is being typed.
  */
 export function applySuggestions(
@@ -443,6 +881,7 @@ export function applySuggestions(
         sheetSize: size,
         pricePerSheet: 0,
         sheetsSource: "suggested",
+        rules: CURRENT_RULES,
       };
       const bigger = rows.findIndex(
         (r) => SHEET_SIZES.indexOf(r.sheetSize) > SHEET_SIZES.indexOf(size),
@@ -453,7 +892,12 @@ export function applySuggestions(
   }
   return refreshSuggestedRows(nextRooms, rows).filter(
     (r) =>
-      !(isSuggested(r) && r.sheetsNeeded === 0 && !(r.pricePerSheet > 0) && r.moldingCount == null),
+      !(
+        followsWalls(r) &&
+        r.sheetsNeeded === 0 &&
+        !(r.pricePerSheet > 0) &&
+        r.moldingCount == null
+      ),
   );
 }
 
@@ -566,6 +1010,10 @@ export interface MoldingLine {
 }
 
 /**
+ * Moldings by length, as counted before update 2 (one per sheet, or a count
+ * typed per length). Kept so a takeoff saved before update 2 still shows the
+ * count he typed; new counts are by kind (see moldingsByKind).
+ *
  * Moldings by length. The LENGTH is the client's rule. He has not said how
  * many moldings a job takes, so no count rule is invented here: the count is
  * whatever he types, and until he types one the page shows one per sheet,
@@ -611,15 +1059,279 @@ export function setMoldingCount(
   );
 }
 
-/** Make every sheet row of a length carry that length's typed count. */
+/** Make every sheet row of a length carry that length's typed count (and every row his counts by kind). */
 export function tidyMoldingCounts(sheetRows: SheetRow[]): SheetRow[] {
   const typed = new Map<MoldingLength, number | null>();
   for (const line of moldingLines(sheetRows)) {
     typed.set(line.lengthFt, line.typed ? line.count : null);
   }
-  return sheetRows.map((r) =>
+  const tidy = sheetRows.map((r) =>
     withMoldingCount(r, typed.get(moldingLengthForSheet(r.sheetSize)) ?? null),
   );
+  // His counts by kind (update 2): the same on every row.
+  return withKindCounts(tidy, typedKindCounts(tidy));
+}
+
+// ---------------------------------------------------------------------------
+// Moldings by kind (update 2, his answer 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * His words: "Molding counts are based off of a few factors. Sheet height, 4'
+ * tall material needs cap on top and bottom (a full stick each) one divider,
+ * and inside/outside corners as needed based off plans. taller than 4' is the
+ * same except cap is 1 stick for top and bottom rather than two."
+ */
+export type MoldingKind = "cap" | "divider" | "insideCorner" | "outsideCorner";
+export const MOLDING_KINDS: MoldingKind[] = ["cap", "divider", "insideCorner", "outsideCorner"];
+export const MOLDING_KIND_NAMES: Record<MoldingKind, string> = {
+  cap: "Cap",
+  divider: "Divider",
+  insideCorner: "Inside corner",
+  outsideCorner: "Outside corner",
+};
+
+/** Cap sticks a sheet: two for 4 ft material, one when the panel is taller. */
+export const CAPS_PER_SHEET_4FT = 2;
+export const CAPS_PER_SHEET_TALLER = 1;
+/** "one divider". */
+export const DIVIDERS_PER_SHEET = 1;
+
+/** The key a kind and length are stored under: "cap-8", "insideCorner-10". */
+export function moldingKey(kind: MoldingKind, lengthFt: MoldingLength): string {
+  return `${kind}-${lengthFt}`;
+}
+
+/** The words that say how far the per-sheet counts go beyond his words. */
+export const MOLDING_PER_SHEET_ASSUMED =
+  "Caps and dividers are counted per sheet: 2 caps a sheet for 4 ft material, 1 when taller, 1 divider a sheet. \"Per sheet\" is our reading of your words (assumed).";
+
+export interface KindLine {
+  key: string;
+  kind: MoldingKind;
+  lengthFt: MoldingLength;
+  /** What his rule gives (corners: what he typed per room). */
+  suggested: number;
+  /** What he typed over it, else the suggestion. */
+  count: number;
+  typed: boolean;
+  /** The working, in words. */
+  working: string;
+  /** Where this line goes beyond his words. */
+  assumed: string[];
+}
+
+export interface LegacyMoldingLine {
+  lengthFt: MoldingLength;
+  count: number;
+}
+
+export interface MoldingTakeoff {
+  /** Lines with a count (or a typed count), by length then kind. */
+  lines: KindLine[];
+  /** Rooms (or corners) left out of the counts, and why, in words. */
+  notCounted: string[];
+  /**
+   * Counts typed per LENGTH before update 2 (all kinds together). They are
+   * his and are kept: the kind lines of that length are not used while one
+   * is there.
+   */
+  legacy: LegacyMoldingLine[];
+}
+
+/** His typed counts by kind (the same object is kept on every sheet row). */
+function typedKindCounts(sheetRows: SheetRow[]): Map<string, number> {
+  const typed = new Map<string, number>();
+  for (const row of sheetRows) {
+    for (const [key, value] of Object.entries(row.moldingCounts ?? {})) {
+      if (!typed.has(key) && typeof value === "number") typed.set(key, value);
+    }
+  }
+  return typed;
+}
+
+function cornerCount(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * Moldings by kind and length, from the rooms (each room knows whether its
+ * sheets are 4 ft material or taller), with his typed counts over them.
+ *
+ * Not counted, and said so (not his rule yet): moldings on 12 ft sheets, and
+ * on stacked walls above 12 ft (caps, the joint between courses, corners).
+ */
+export function moldingsByKind(
+  roomRows: RoomRow[],
+  sheetRows: SheetRow[],
+  options: { rounding?: WallRounding } = {},
+): MoldingTakeoff {
+  const job = suggestSheets(roomRows, options);
+  const typed = typedKindCounts(sheetRows);
+  const notCounted: string[] = [];
+
+  type Acc = {
+    caps4: number;
+    capsTall: number;
+    sheets: number;
+    fourByFour: boolean;
+    inside: { label: string; n: number }[];
+    outside: { label: string; n: number }[];
+  };
+  const acc: Record<MoldingLength, Acc> = {
+    8: { caps4: 0, capsTall: 0, sheets: 0, fourByFour: false, inside: [], outside: [] },
+    10: { caps4: 0, capsTall: 0, sheets: 0, fourByFour: false, inside: [], outside: [] },
+  };
+
+  roomRows.forEach((row, index) => {
+    const s = job.rooms[index]!;
+    const label = roomLabel(row, index);
+    const inside = cornerCount(row.insideCorners);
+    const outside = cornerCount(row.outsideCorners);
+    const corners =
+      inside + outside > 0
+        ? ` The corners typed (${inside} inside, ${outside} outside) are not in the counts either.`
+        : "";
+    if (s.layout === null) {
+      if (inside + outside > 0) {
+        notCounted.push(
+          `${label}: corners typed (${inside} inside, ${outside} outside) are not counted until the room has a sheet count (${s.problem}).`,
+        );
+      }
+      return;
+    }
+    if (s.layout === "stack") {
+      notCounted.push(
+        `${label}: no moldings counted. A stacked wall above ${LONGEST_SHEET_FT} ft: its caps, the joint between courses and its corners are not a rule we have yet. Count them yourself.${corners}`,
+      );
+      return;
+    }
+    const part = s.parts[0]!;
+    if (part.size === "4x12") {
+      notCounted.push(
+        `${label}: no moldings counted. 12 ft sheets: which molding goes on a 12 ft sheet is not a rule we have yet (moldings come in 8 ft and 10 ft). Count them yourself.${corners}`,
+      );
+      return;
+    }
+    const a = acc[moldingLengthForSheet(part.size)];
+    if (part.fourFtTall) a.caps4 += part.sheets;
+    else a.capsTall += part.sheets;
+    a.sheets += part.sheets;
+    if (part.size === "4x4") a.fourByFour = true;
+    if (inside > 0) a.inside.push({ label, n: inside });
+    if (outside > 0) a.outside.push({ label, n: outside });
+  });
+
+  const lines: KindLine[] = [];
+  const push = (
+    kind: MoldingKind,
+    lengthFt: MoldingLength,
+    suggested: number,
+    working: string,
+    assumed: string[],
+  ) => {
+    const key = moldingKey(kind, lengthFt);
+    const mine = typed.get(key);
+    if (!(suggested > 0) && mine === undefined) return;
+    lines.push({
+      key,
+      kind,
+      lengthFt,
+      suggested,
+      count: mine !== undefined ? mine : suggested,
+      typed: mine !== undefined,
+      working,
+      assumed,
+    });
+  };
+
+  for (const lengthFt of MOLDING_LENGTHS) {
+    const a = acc[lengthFt];
+    const fourByFourNote = a.fourByFour
+      ? ["4x4 panels are counted like other 4 ft material (2 caps and 1 divider a panel): assumed"]
+      : [];
+
+    // Caps.
+    const capExact = CAPS_PER_SHEET_4FT * a.caps4 + CAPS_PER_SHEET_TALLER * a.capsTall;
+    const caps = Math.ceil(capExact - 1e-9);
+    const capTerms = [
+      ...(a.caps4 > 0 ? [`${CAPS_PER_SHEET_4FT} a sheet × ${plain(a.caps4)} ${sheetsNoun(a.caps4)} 4 ft tall`] : []),
+      ...(a.capsTall > 0
+        ? [`${CAPS_PER_SHEET_TALLER} a sheet × ${plain(a.capsTall)} ${sheetsNoun(a.capsTall)} taller than 4 ft`]
+        : []),
+    ];
+    push(
+      "cap",
+      lengthFt,
+      caps,
+      capTerms.length === 0
+        ? ""
+        : `${capTerms.join(" + ")} = ${caps === capExact ? caps : `${plain(capExact)}, rounded up to ${caps}`}`,
+      fourByFourNote,
+    );
+
+    // Dividers.
+    const dividers = Math.ceil(DIVIDERS_PER_SHEET * a.sheets - 1e-9);
+    push(
+      "divider",
+      lengthFt,
+      dividers,
+      a.sheets > 0
+        ? `${DIVIDERS_PER_SHEET} a sheet × ${plain(a.sheets)} ${sheetsNoun(a.sheets)} = ${
+            dividers === a.sheets ? dividers : `${plain(a.sheets)}, rounded up to ${dividers}`
+          }`
+        : "",
+      fourByFourNote,
+    );
+
+    // Corners: only what he typed per room ("as needed based off plans").
+    for (const [kind, list] of [
+      ["insideCorner", a.inside],
+      ["outsideCorner", a.outside],
+    ] as const) {
+      const total = list.reduce((sum, c) => sum + c.n, 0);
+      push(
+        kind,
+        lengthFt,
+        total,
+        list.length > 0 ? `typed per room: ${list.map((c) => `${c.label} ${c.n}`).join(" + ")} = ${total}` : "",
+        [],
+      );
+    }
+  }
+
+  // Counts typed per length before update 2 (all kinds together) stay his.
+  const legacy: LegacyMoldingLine[] = [];
+  for (const lengthFt of MOLDING_LENGTHS) {
+    const row = sheetRows.find(
+      (r) => moldingLengthForSheet(r.sheetSize) === lengthFt && r.moldingCount != null,
+    );
+    if (row && typeof row.moldingCount === "number") legacy.push({ lengthFt, count: row.moldingCount });
+  }
+
+  return { lines, notCounted, legacy };
+}
+
+/** Type (or, with null, clear) his count for one kind and length. */
+export function setKindCount(sheetRows: SheetRow[], key: string, count: number | null): SheetRow[] {
+  const typed = typedKindCounts(sheetRows);
+  if (count === null) typed.delete(key);
+  else typed.set(key, count);
+  return withKindCounts(sheetRows, typed);
+}
+
+function withKindCounts(sheetRows: SheetRow[], typed: Map<string, number>): SheetRow[] {
+  const keys = [...typed.keys()].sort();
+  return sheetRows.map((row) => {
+    if (keys.length === 0) {
+      if (!("moldingCounts" in row)) return row;
+      const { moldingCounts: _cleared, ...rest } = row;
+      return rest;
+    }
+    const counts: Record<string, number> = {};
+    for (const k of keys) counts[k] = typed.get(k)!;
+    return sameJson(row.moldingCounts ?? null, counts) ? row : { ...row, moldingCounts: counts };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +1520,12 @@ function shown(value: unknown): string {
   return typeof value === "number" ? String(value) : (JSON.stringify(value) ?? String(value));
 }
 
+/** Nothing typed (null / absent), or a whole number of 0 or more. */
+function wholeOrNothing(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 /** A number that is below 0, or not a real number at all (1e999). */
 function belowZero(value: unknown): boolean {
   return typeof value === "number" && !(Number.isFinite(value) && value >= 0);
@@ -826,7 +1544,8 @@ const NEVER_BELOW_ZERO: [key: keyof CostInput, name: string][] = [
 /**
  * Why a takeoff cannot be stored, in plain words. Empty = fine.
  *
- * A sheet count is a whole number of 0 or more. No money and no quantity is
+ * A sheet count, a corner count and a molding count by kind are whole numbers
+ * of 0 or more. No money and no quantity is
  * below 0: sheet prices, molding counts, the labor rate, days, hours, miles,
  * nights, freight, profit. (0 itself is fine: an empty price box is stored as
  * 0 and means "not priced", never a price of $0.00.) Nothing is put right
@@ -853,6 +1572,30 @@ export function checkTakeoffNumbers(takeoff: unknown): string[] {
     }
     if (belowZero(row.moldingCount)) {
       problems.push(`${where}: the molding count cannot be below 0 (it is ${shown(row.moldingCount)}).`);
+    }
+    const kinds = row.moldingCounts;
+    if (isRecord(kinds)) {
+      for (const [key, value] of Object.entries(kinds)) {
+        if (!wholeOrNothing(value) || value == null) {
+          problems.push(
+            `${where}: the ${key.replace("-", " ")} ft molding count must be a whole number of 0 or more (it is ${shown(value)}).`,
+          );
+        }
+      }
+    }
+  });
+  const rooms = Array.isArray(data.roomRows) ? data.roomRows : [];
+  rooms.forEach((raw: unknown, index: number) => {
+    const row = isRecord(raw) ? raw : {};
+    for (const [key, name] of [
+      ["insideCorners", "inside corners"],
+      ["outsideCorners", "outside corners"],
+    ] as const) {
+      if (!wholeOrNothing(row[key])) {
+        problems.push(
+          `Room ${index + 1}: the ${name} must be a whole number of 0 or more (it is ${shown(row[key])}).`,
+        );
+      }
     }
   });
   for (const [key, name] of NEVER_BELOW_ZERO) {
