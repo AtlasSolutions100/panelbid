@@ -166,7 +166,12 @@ export function ProposalSection({
   const [previewOpen, setPreviewOpen] = useState(false)
   const [confirmRegenerate, setConfirmRegenerate] = useState(false)
   // Sizes whose rows differ from what the walls need: the server asked first.
-  const [countDiffs, setCountDiffs] = useState<string[] | null>(null)
+  const [countStop, setCountStop] = useState<{
+    differences: string[]
+    note: string | null
+    fingerprint: string
+    changed: boolean
+  } | null>(null)
   const [fields, setFields] = useState<ProposalFields | null>(null)
   const [dirty, setDirty] = useState(false)
   // What the window shows right now, readable when a save's answer arrives.
@@ -221,12 +226,13 @@ export function ProposalSection({
         : []),
   ]
 
-  const runGenerate = (confirmCounts = false) => {
+  const runGenerate = (confirmCounts?: string) => {
     // The price this proposal holds now: said in the message if it is cleared.
     const priceBefore = proposal?.priceAmount ?? 0
     generateProposal.mutate(
       // The confirmation goes with this one request only: never remembered.
-      { jobId, data: confirmCounts ? { confirmCounts: true } : undefined },
+      // It is the fingerprint of the list he was shown, so it covers only those rows.
+      { jobId, data: confirmCounts ? { confirmCounts } : undefined },
       {
         onSuccess: (p) => {
           queryClient.setQueryData(getGetProposalQueryKey(jobId), p)
@@ -244,9 +250,16 @@ export function ProposalSection({
           })
         },
         onError: (err) => {
-          const data = (err as { data?: { code?: unknown; differences?: unknown } } | null)?.data
-          if (data?.code === "counts_differ" && Array.isArray(data.differences)) {
-            setCountDiffs(data.differences.map(String))
+          const data = (err as {
+            data?: { code?: unknown; differences?: unknown; note?: unknown; fingerprint?: unknown; changed?: unknown }
+          } | null)?.data
+          if (data?.code === "counts_differ" && Array.isArray(data.differences) && typeof data.fingerprint === "string") {
+            setCountStop({
+              differences: data.differences.map(String),
+              note: typeof data.note === "string" ? data.note : null,
+              fingerprint: data.fingerprint,
+              changed: data.changed === true,
+            })
             return
           }
           toast({
@@ -444,17 +457,25 @@ export function ProposalSection({
         )}
       </CardContent>
 
-      <AlertDialog open={countDiffs !== null} onOpenChange={(open) => !open && setCountDiffs(null)}>
+      <AlertDialog open={countStop !== null} onOpenChange={(open) => !open && setCountStop(null)}>
         <AlertDialogContent data-testid="dialog-count-differences">
           <AlertDialogHeader>
             <AlertDialogTitle>The sheet rows do not match what the walls need</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
+                {countStop?.changed && (
+                  <p className="font-medium text-amber-700" data-testid="text-count-differences-changed">
+                    The takeoff changed after you looked (someone saved it, or this page was old). This is the list now.
+                  </p>
+                )}
                 <ul className="list-disc pl-5 font-mono text-foreground" data-testid="list-count-differences">
-                  {(countDiffs ?? []).map((d) => (
+                  {(countStop?.differences ?? []).map((d) => (
                     <li key={d}>{d}</li>
                   ))}
                 </ul>
+                {countStop?.note && (
+                  <p className="text-amber-700" data-testid="text-count-differences-note">{countStop.note}</p>
+                )}
                 <p>
                   A row you typed may be right (you know the job), or it may count the same walls as another row.
                   Check the takeoff, or make the proposal with the rows as they are. Nothing is printed until you choose.
@@ -466,8 +487,9 @@ export function ProposalSection({
             <AlertDialogCancel data-testid="button-cancel-count-differences">Check the takeoff</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                setCountDiffs(null)
-                runGenerate(true)
+                const seen = countStop?.fingerprint
+                setCountStop(null)
+                runGenerate(seen)
               }}
               data-testid="button-confirm-count-differences"
             >

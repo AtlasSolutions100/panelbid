@@ -53,6 +53,7 @@ import {
   CURRENT_RULES,
   MOLDING_KIND_NAMES,
   addSuggestedSize,
+  countCheck,
   jobHasTypedRow,
   wallNeeds,
   MOLDING_PER_SHEET_ASSUMED,
@@ -620,6 +621,8 @@ export function TakeoffSection({
   // what the walls need is shown beside his rows, with "add N x size".
   const typedJob = !earlierRules && jobHasTypedRow(sheetRows)
   const needs = useMemo(() => wallNeeds(roomRows, sheetRows), [roomRows, sheetRows])
+  // What the proposal's count check leaves out (rooms not measured).
+  const checkNote = useMemo(() => countCheck(roomRows, sheetRows).note, [roomRows, sheetRows])
   const typedRowsWords = sheetRows
     .filter((r) => r.sheetsSource !== "suggested" && r.sheetsNeeded > 0)
     .map((r) => `${r.sheetsNeeded} x ${r.sheetSize}`)
@@ -1335,6 +1338,11 @@ export function TakeoffSection({
             </tbody>
           </table>
         </div>
+        {checkNote && (
+          <p className="px-4 pt-2 text-[11px] font-medium text-amber-700" data-testid="text-count-check-note">
+            {checkNote}
+          </p>
+        )}
         {Object.keys(suggestion.sizeWorking).length > 0 && (
           <p className="px-4 pt-2 text-[11px] text-muted-foreground" data-testid="text-size-working">
             Suggested from the walls, rounded up once per size:{" "}
