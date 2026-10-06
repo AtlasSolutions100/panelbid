@@ -1164,7 +1164,7 @@ export function TakeoffSection({
         {typedJob && (
           <div className="mx-4 mb-2 rounded-md border border-amber-400 bg-amber-50/70 p-3 text-xs" data-testid="box-typed-job">
             <p className="font-medium text-amber-900">
-              You typed your own count ({typedRowsWords}). While you have typed counts, no row is added or changed by itself: the app cannot tell which rooms your typed rows cover.
+              You typed your own count ({typedRowsWords}). While you have typed counts, no row of a new size is added by itself (the app cannot tell which rooms your typed rows cover); suggested rows still follow the walls, and your typed rows are never changed.
             </p>
             <p className="mt-1 text-amber-900">Under the rules, the walls need:</p>
             <ul className="mt-1 space-y-1">
